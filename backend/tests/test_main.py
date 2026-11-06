@@ -49,6 +49,49 @@ def test_home_serves_static_html(client: TestClient) -> None:
     assert 'fetch("/api/hello")' in response.text
 
 
+def test_ai_connectivity_check_returns_the_model_answer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_get_ai_response(prompt: str, *, model: str | None = None) -> str:
+        assert prompt == "2+2"
+        assert model is None
+        return "4"
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+    response = client.get("/api/ai/test")
+
+    assert response.status_code == 200
+    assert response.json() == {"answer": "4", "model": "openai/gpt-oss-120b"}
+
+
+def test_ai_connectivity_check_requires_an_api_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    response = client.get("/api/ai/test")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "OPENAI_API_KEY is not configured."
+
+
+def test_ai_connectivity_check_reports_provider_failures(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_get_ai_response(prompt: str, *, model: str | None = None) -> str:
+        raise RuntimeError("provider blew up")
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+    response = client.get("/api/ai/test")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "provider blew up"
+
+
 def test_login_sets_http_only_session_cookie_and_session_is_available(
     client: TestClient,
 ) -> None:

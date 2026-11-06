@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from fastapi.staticfiles import StaticFiles
 
+from app.ai import AIConfigurationError, AIProviderError, DEFAULT_OPENAI_MODEL, get_ai_response
 from app.database import (
     FixedColumnsError,
     get_board,
@@ -29,6 +30,10 @@ session_cookie = "session"
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class AIProbeRequest(BaseModel):
+    prompt: str = Field(default="2+2", min_length=1)
 
 
 class BoardCard(BaseModel):
@@ -103,9 +108,45 @@ def require_session_username(request: Request) -> str:
     return get_session_username(request)
 
 
+def run_ai_probe(prompt: str) -> dict[str, str]:
+    try:
+        answer = get_ai_response(prompt)
+    except AIConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except AIProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(error),
+        ) from error
+    except Exception as error:  # pragma: no cover - provider-level runtime errors
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(error),
+        ) from error
+    return {"answer": answer, "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)}
+
+
 @app.get("/api/hello")
 def hello() -> dict[str, str]:
     return {"message": "Hello, world!"}
+
+
+@app.get("/api/ai/test")
+@app.get("/api/ai/connectivity-check")
+@app.get("/api/ai/health")
+def ai_connectivity_check_get(prompt: str = "2+2") -> dict[str, str]:
+    return run_ai_probe(prompt)
+
+
+@app.post("/api/ai/test")
+@app.post("/api/ai/connectivity-check")
+@app.post("/api/ai/health")
+def ai_connectivity_check(payload: AIProbeRequest | None = None) -> dict[str, str]:
+    prompt = payload.prompt if payload else "2+2"
+    return run_ai_probe(prompt)
 
 
 @app.post("/api/auth/login")
