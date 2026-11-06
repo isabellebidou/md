@@ -4,7 +4,7 @@
 
 Install Docker with Compose, then run `scripts/start-mac.sh` or `scripts/start-linux.sh`; on Windows, run `scripts\start-windows.bat`. Open http://localhost:8000. Stop the app with the matching `stop` script.
 
-Sign in with the MVP credentials `user` / `password`. The root `.env` is not included in the Docker build context. Set `SESSION_SECRET` in the environment or root `.env` to keep sessions valid across app restarts; otherwise, restarting the backend signs users out.
+Sign in with the MVP credentials `user` / `password`. The board database is stored in the Docker `kanban-data` volume. The root `.env` is not included in the Docker build context. Set `SESSION_SECRET` in the environment or root `.env` to keep sessions valid across app restarts; otherwise, restarting the backend signs users out.
 
 ## curl test
 curl http://localhost:8000/api/hello

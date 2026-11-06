@@ -5,4 +5,10 @@ services:
       - "8000:8000"
     environment:
       SESSION_SECRET: ${SESSION_SECRET:-}
+      DATABASE_PATH: /data/kanban.sqlite3
+    volumes:
+      - kanban-data:/data
     restart: unless-stopped
+
+volumes:
+  kanban-data:

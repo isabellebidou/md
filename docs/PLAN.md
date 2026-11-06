@@ -67,28 +67,32 @@ For tests, prioritize correctness, user-visible acceptance criteria, and securit
 
 ## Part 5: Database modeling
 
-- [ ] Propose a JSON schema for users, each user's single board, the board's fixed-but-renamable columns, and cards with their ordering and content.
-- [ ] Document the SQLite persistence approach, relationships, and important constraints in `docs/`.
-- [ ] Keep the schema suitable for multiple users while limiting each user to one board.
-- [ ] Ask the user to review and approve the schema and database approach before Part 6.
+- [x] Propose a JSON schema for users, each user's single board, the board's fixed-but-renamable columns, and cards with their ordering and content.
+- [x] Document the SQLite persistence approach, relationships, and important constraints in `docs/`.
+- [x] Keep the schema suitable for multiple users while limiting each user to one board.
+- [x] Ask the user to review and approve the schema and database approach before Part 6.
 
 **Tests**
-- [ ] Validate the schema JSON parses and follows the documented structure.
-- [ ] Review that the schema represents board ownership, ordered columns/cards, and the one-board-per-user constraint.
+- [x] Validate the schema JSON parses and follows the documented structure.
+- [x] Review that the schema represents board ownership, ordered columns/cards, and the one-board-per-user constraint.
+
+**Approval:** The user approved the schema and database approach before Part 6.
 
 **Success criteria:** A machine-readable schema and concise database design document exist, and the user has approved them.
 
 ## Part 6: Backend board API
 
-- [ ] Initialize SQLite and create the schema automatically when the database file is absent.
-- [ ] Implement authenticated API routes to read and update the signed-in user's board.
-- [ ] Validate incoming board data and return clear HTTP errors for invalid or unauthorized requests.
-- [ ] Ensure a user's board operations cannot read or modify another user's board.
+- [x] Initialize SQLite and create the schema automatically when the database file is absent.
+- [x] Implement authenticated API routes to read and update the signed-in user's board.
+- [x] Validate incoming board data and return clear HTTP errors for invalid or unauthorized requests.
+- [x] Ensure a user's board operations cannot read or modify another user's board.
 
 **Tests**
-- [ ] Add backend unit tests for database initialization and repeat initialization.
-- [ ] Test reading and updating a board, persistence across database connections/restarts, and creation of a board when needed.
-- [ ] Test invalid payloads, unauthenticated access, and cross-user isolation.
+- [x] Add backend unit tests for database initialization and repeat initialization.
+- [x] Test reading and updating a board, persistence across database connections/restarts, and creation of a board when needed.
+- [x] Test invalid payloads, unauthenticated access, and cross-user isolation.
+
+**Validation:** All 13 backend tests passed. A production container build passed; authenticated board reads and updates succeeded, and an update survived container recreation with the same Docker volume.
 
 **Success criteria:** The API persists valid board changes in SQLite, initializes a fresh database automatically, and enforces user ownership.
 

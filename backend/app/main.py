@@ -2,13 +2,22 @@ import hashlib
 import hmac
 import os
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="Project Management API")
+from app.database import (
+    FixedColumnsError,
+    get_board,
+    get_database_path,
+    initialize_database,
+    save_board,
+)
+
 static_dir = Path(__file__).parent / "static"
 session_secret = os.environ.get("SESSION_SECRET")
 session_key = (
@@ -20,6 +29,55 @@ session_cookie = "session"
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class BoardCard(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    details: str
+
+
+class BoardColumn(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    card_ids: list[str] = Field(alias="cardIds")
+
+
+class BoardData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    columns: list[BoardColumn] = Field(min_length=5, max_length=5)
+    cards: dict[str, BoardCard]
+
+    @model_validator(mode="after")
+    def validate_card_references(self) -> "BoardData":
+        column_ids = [column.id for column in self.columns]
+        if len(set(column_ids)) != len(column_ids):
+            raise ValueError("Column IDs must be unique.")
+
+        card_ids = [
+            card_id for column in self.columns for card_id in column.card_ids
+        ]
+        if len(set(card_ids)) != len(card_ids):
+            raise ValueError("Each card must appear in only one column.")
+        if set(card_ids) != set(self.cards):
+            raise ValueError("Column card IDs must match the board's cards.")
+        if any(card.id != card_id for card_id, card in self.cards.items()):
+            raise ValueError("Each card ID must match its key in the cards map.")
+        return self
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    initialize_database(get_database_path())
+    yield
+
+
+app = FastAPI(title="Project Management API", lifespan=lifespan)
 
 
 def create_session_token(username: str) -> str:
@@ -39,6 +97,10 @@ def get_session_username(request: Request) -> str:
     if not hmac.compare_digest(signature, expected_signature):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     return username
+
+
+def require_session_username(request: Request) -> str:
+    return get_session_username(request)
 
 
 @app.get("/api/hello")
@@ -76,6 +138,36 @@ def logout() -> Response:
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(key=session_cookie, httponly=True, samesite="lax", path="/")
     return response
+
+
+@app.get("/api/board", response_model=BoardData)
+def read_board(request: Request) -> BoardData:
+    username = require_session_username(request)
+    board = get_board(username)
+    if board is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Board not found",
+        )
+    return BoardData.model_validate(board)
+
+
+@app.put("/api/board", response_model=BoardData)
+def update_board(board: BoardData, request: Request) -> BoardData:
+    username = require_session_username(request)
+    try:
+        save_board(username, board.model_dump(by_alias=True))
+    except FixedColumnsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error
+    except LookupError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(error),
+        ) from error
+    return board
 
 
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")

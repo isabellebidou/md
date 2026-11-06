@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pm.local/docs/kanban.schema.json",
+  "title": "Project management users and Kanban boards",
+  "description": "JSON representation for exporting users and their single Kanban board.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "users"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/user"
+      }
+    }
+  },
+  "$defs": {
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "username", "board"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1
+        },
+        "board": {
+          "$ref": "#/$defs/board"
+        }
+      }
+    },
+    "board": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "columns", "cards"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/column"
+          }
+        },
+        "cards": {
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/card"
+          }
+        }
+      }
+    },
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "cardIds"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cardIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "details"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "type": "string"
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

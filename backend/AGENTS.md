@@ -4,6 +4,8 @@
 
 - `app/main.py` defines the FastAPI application and routes.
 - `/api/auth/login`, `/api/auth/session`, and `/api/auth/logout` provide the MVP signed-cookie session.
+- `/api/board` reads and replaces the signed-in user's board in SQLite.
+- `app/database.py` creates the SQLite tables and initial user board at startup.
 - `app/static/` contains the checked-in hello-world fallback page for local backend tests. The Docker build replaces it with the static Next.js export.
 - FastAPI serves the static frontend at `/`; API routes are registered before the static mount.
 - `tests/` contains pytest coverage for the API, authentication, and example page.
