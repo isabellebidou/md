@@ -1,0 +1,11 @@
+.env
+.git
+.DS_Store
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/node_modules
+frontend/.next
+frontend/out
+backend/*.db
+backend/*.sqlite*

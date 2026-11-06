@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Project Management App</title>
+  </head>
+  <body>
+    <main>
+      <h1>Hello, world!</h1>
+      <p>FastAPI is serving this page.</p>
+      <p id="api-response">Checking API...</p>
+    </main>
+    <script>
+      fetch("/api/hello")
+        .then((response) => {
+          if (!response.ok) throw new Error("API request failed");
+          return response.json();
+        })
+        .then(({ message }) => {
+          document.querySelector("#api-response").textContent = message;
+        })
+        .catch((error) => {
+          document.querySelector("#api-response").textContent = error.message;
+        });
+    </script>
+  </body>
+</html>
