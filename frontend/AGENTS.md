@@ -4,9 +4,9 @@
 
 - This is a Next.js App Router app using React and TypeScript. The home route is `src/app/page.tsx`; shared layout and global styles are in `src/app/layout.tsx` and `src/app/globals.css`.
 - `src/components/AuthenticatedApp.tsx` checks the backend session and gates the board behind sign-in; it handles login and logout through FastAPI.
-- `src/components/` also contains the Kanban board, columns, cards, preview, and new-card form. `KanbanBoard` currently owns in-memory board state and drag-and-drop behavior.
+- `src/components/` also contains the Kanban board, columns, cards, preview, new-card form, and AI chat sidebar. `KanbanBoard` owns the current board state, drag-and-drop interactions, and persistence through the backend board API.
 - `src/lib/kanban.ts` defines the board, column, and card types, sample board data, card-move logic, and ID creation.
-- The board is still an in-memory demo; persistent board API integration and AI chat are planned later.
+- `AIChatSidebar` sends questions and conversation history to the board-aware backend AI API and refreshes the board after an AI update.
 
 ## Conventions
 

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -90,6 +91,178 @@ def test_ai_connectivity_check_reports_provider_failures(
 
     assert response.status_code == 502
     assert response.json()["detail"] == "provider blew up"
+
+
+def test_ai_chat_includes_board_and_history_in_prompt(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    captured: dict[str, str] = {}
+
+    def fake_get_ai_response(prompt: str, *, model: str | None = None) -> str:
+        captured["prompt"] = prompt
+        return '{"reply": "I can help.", "actions": []}'
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+    sign_in(client)
+
+    response = client.post(
+        "/api/ai/chat",
+        json={
+            "question": "Move the roadmap card to review.",
+            "conversation": [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"reply": "I can help.", "board_update": None}
+    assert "Move the roadmap card to review." in captured["prompt"]
+    assert "Board JSON" in captured["prompt"]
+    assert "Hi there" in captured["prompt"]
+    assert '"action":"create_card"' in captured["prompt"]
+    assert "Never return a full board snapshot" in captured["prompt"]
+
+
+def test_ai_chat_creates_the_requested_card_in_backlog(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    sign_in(client)
+
+    def fake_get_ai_response(prompt: str, *, model: str | None = None) -> str:
+        return json.dumps(
+            {
+                "reply": 'Created "blue ring" in Backlog.',
+                "actions": [
+                    {
+                        "action": "create_card",
+                        "title": "blue ring",
+                        "details": "",
+                        "column": "Backlog",
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+
+    response = client.post(
+        "/api/ai/chat",
+        json={
+            "question": 'create card "blue ring" and place it into backlog',
+            "conversation": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reply"] == 'Created "blue ring" in Backlog.'
+    saved_board = client.get("/api/board").json()
+    created_id = saved_board["columns"][0]["cardIds"][-1]
+    assert saved_board["cards"][created_id]["title"] == "blue ring"
+    assert created_id.startswith("ai-card-")
+    assert all(
+        created_id not in column["cardIds"]
+        for column in saved_board["columns"][1:]
+    )
+
+
+def test_ai_chat_edits_and_moves_a_card(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    sign_in(client)
+
+    def fake_get_ai_response(prompt: str, *, model: str | None = None) -> str:
+        return json.dumps(
+            {
+                "reply": "Updated and moved the roadmap card.",
+                "actions": [
+                    {
+                        "action": "edit_card",
+                        "card_id": "card-1",
+                        "title": "Blue ring",
+                        "details": "Updated by the assistant.",
+                    },
+                    {
+                        "action": "move_card",
+                        "card_id": "card-1",
+                        "column": "col-discovery",
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+
+    response = client.post(
+        "/api/ai/chat",
+        json={"question": "Edit and move the roadmap card.", "conversation": []},
+    )
+
+    assert response.status_code == 200
+    saved_board = client.get("/api/board").json()
+    assert saved_board["cards"]["card-1"] == {
+        "id": "card-1",
+        "title": "Blue ring",
+        "details": "Updated by the assistant.",
+    }
+    assert "card-1" in saved_board["columns"][1]["cardIds"]
+    assert all(
+        "card-1" not in column["cardIds"]
+        for column in [saved_board["columns"][0], *saved_board["columns"][2:]]
+    )
+
+
+def test_ai_chat_rejects_malformed_model_output(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    sign_in(client)
+
+    def fake_get_ai_response(prompt: str, *, model: str | None = None) -> str:
+        return "not-json"
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+
+    response = client.post(
+        "/api/ai/chat",
+        json={"question": "Move something", "conversation": []},
+    )
+
+    assert response.status_code == 502
+    assert "not valid JSON" in response.json()["detail"]
+
+
+def test_ai_chat_rejects_invalid_board_updates(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    sign_in(client)
+
+    def fake_get_ai_response(prompt: str, *, model: str | None = None) -> str:
+        return '{"reply": "bad action", "actions": [{"action": "move_card", "card_id": "missing-card", "column": "Backlog"}]}'
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+
+    response = client.post(
+        "/api/ai/chat",
+        json={"question": "Change the board", "conversation": []},
+    )
+
+    assert response.status_code == 502
+    assert "missing-card" in response.json()["detail"]
+
+
+def test_ai_chat_requires_a_session(client: TestClient) -> None:
+    response = client.post(
+        "/api/ai/chat",
+        json={"question": "Move a card", "conversation": []},
+    )
+
+    assert response.status_code == 401
 
 
 def test_login_sets_http_only_session_cookie_and_session_is_available(

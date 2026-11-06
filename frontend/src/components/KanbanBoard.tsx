@@ -8,11 +8,14 @@ import {
   useSensor,
   useSensors,
   closestCorners,
+  pointerWithin,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import { AIChatSidebar } from "@/components/AIChatSidebar";
 import { createId, moveCard, type BoardData } from "@/lib/kanban";
 
 type KanbanBoardProps = {
@@ -35,6 +38,12 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
       activationConstraint: { distance: 6 },
     })
   );
+  const collisionDetection: CollisionDetection = (args) => {
+    const pointerCollisions = pointerWithin(args);
+    return pointerCollisions.length > 0
+      ? pointerCollisions
+      : closestCorners(args);
+  };
 
   const cardsById = useMemo(() => board.cards, [board.cards]);
 
@@ -157,6 +166,20 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
     });
   };
 
+  const refreshBoard = async () => {
+    const response = await fetch("/api/board", { credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error(`Board refresh failed (${response.status}).`);
+    }
+    const savedBoard = (await response.json()) as BoardData;
+    boardVersion.current += 1;
+    persistedSnapshot.current = JSON.stringify(savedBoard);
+    setBoard(savedBoard);
+    setSaveError("");
+    setSaveStatus("saved");
+    setRetryCount(0);
+  };
+
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
 
   return (
@@ -232,23 +255,31 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
 
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={collisionDetection}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <section className="grid gap-6 lg:grid-cols-5">
-            {board.columns.map((column) => (
-              <KanbanColumn
-                key={column.id}
-                column={column}
-                cards={column.cardIds.map((cardId) => board.cards[cardId])}
-                onRename={handleRenameColumn}
-                onAddCard={handleAddCard}
-                onDeleteCard={handleDeleteCard}
-                onEditCard={handleEditCard}
-              />
-            ))}
-          </section>
+          <div className="grid min-w-0 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="min-w-0 overflow-x-auto pb-2">
+              <section className="grid min-w-[1050px] grid-cols-5 gap-6">
+                {board.columns.map((column) => (
+                  <KanbanColumn
+                    key={column.id}
+                    column={column}
+                    cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                    onRename={handleRenameColumn}
+                    onAddCard={handleAddCard}
+                    onDeleteCard={handleDeleteCard}
+                    onEditCard={handleEditCard}
+                  />
+                ))}
+              </section>
+            </div>
+            <AIChatSidebar
+              canSend={saveStatus === "saved"}
+              onBoardUpdated={refreshBoard}
+            />
+          </div>
           <DragOverlay>
             {activeCard ? (
               <div className="w-[260px]">

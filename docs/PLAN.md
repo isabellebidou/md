@@ -134,29 +134,31 @@ For tests, prioritize correctness, user-visible acceptance criteria, and securit
 
 ## Part 9: Board-aware AI API
 
-- [ ] Extend the AI request to include the current board JSON, the user's question, and conversation history.
-- [ ] Define a structured response containing a user-facing reply and an optional validated board update.
-- [ ] Apply updates only to the authenticated user's board and persist them through the board data layer.
-- [ ] Handle invalid structured output and provider errors explicitly.
+- [x] Extend the AI request to include the current board JSON, the user's question, and conversation history.
+- [x] Define a structured response containing a user-facing reply and an optional validated board update.
+- [x] Apply updates only to the authenticated user's board and persist them through the board data layer.
+- [x] Handle invalid structured output and provider errors explicitly.
 
 **Tests**
-- [ ] Test prompt/request inputs include the current board, question, and relevant conversation history.
-- [ ] Test structured responses with no board update and with valid create/edit/move updates.
-- [ ] Test malformed output, invalid board mutations, provider errors, and user isolation.
-- [ ] Keep automated tests deterministic with a mocked model response.
+- [x] Test prompt/request inputs include the current board, question, and relevant conversation history.
+- [x] Test structured responses with no board update and with valid create/edit/move updates.
+- [x] Test malformed output, invalid board mutations, provider errors, and user isolation.
+- [x] Keep automated tests deterministic with a mocked model response.
 
 **Success criteria:** The API returns a validated structured reply and, when requested, persists only valid changes to the signed-in user's board.
 
 ## Part 10: AI chat sidebar
 
-- [ ] Add a sidebar chat interface to the board with message history, input, submit, and pending/error states.
-- [ ] Send each user question and relevant conversation history to the board-aware AI API.
-- [ ] Render the assistant reply and refresh the board from the saved server state whenever the AI changes it.
-- [ ] Keep chat and board interactions usable at supported viewport sizes and preserve the existing visual system.
+- [x] Add a sidebar chat interface to the board with message history, input, submit, and pending/error states.
+- [x] Send each user question and relevant conversation history to the board-aware AI API.
+- [x] Render the assistant reply and refresh the board from the saved server state whenever the AI changes it.
+- [x] Keep chat and board interactions usable at supported viewport sizes and preserve the existing visual system.
 
 **Tests**
-- [ ] Add frontend tests for message submission, reply rendering, errors, and board refresh after an AI update.
-- [ ] Add end-to-end coverage for a chat response without a change and a response that updates the board.
-- [ ] Run the full frontend and backend suites and build the production container.
+- [x] Add frontend tests for message submission, reply rendering, errors, and board refresh after an AI update.
+- [x] Add end-to-end coverage for a chat response without a change and a response that updates the board.
+- [x] Run the full frontend and backend suites and build the production container.
+
+**Validation:** Frontend lint, 15 frontend unit tests, 10 Playwright tests, 22 backend tests, static production build, and Docker Compose production image build all passed. The live model was also verified creating a card, editing a card, and moving a card in one request using a temporary database. Drag-and-drop coverage moves a card from In Progress to Discovery and then Backlog.
 
 **Success criteria:** A signed-in user can chat in the sidebar; AI-created, edited, or moved cards appear in the UI and remain persisted after reload.

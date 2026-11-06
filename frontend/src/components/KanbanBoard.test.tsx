@@ -106,4 +106,93 @@ describe("KanbanBoard", () => {
     await user.click(screen.getByRole("button", { name: "Retry save" }));
     expect(await screen.findByText("All changes saved")).toBeVisible();
   });
+
+  it("sends chat history and renders the assistant reply", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ reply: "Your board has eight cards.", board_update: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ reply: "There are five columns.", board_update: null }),
+      });
+    renderBoard();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Message the AI assistant"), "Summarize my board");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Your board has eight cards.")).toBeVisible();
+
+    await user.type(screen.getByLabelText("Message the AI assistant"), "How many columns?");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("There are five columns.")).toBeVisible();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/ai/chat",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          question: "How many columns?",
+          conversation: [
+            { role: "user", content: "Summarize my board" },
+            { role: "assistant", content: "Your board has eight cards." },
+          ],
+        }),
+      })
+    );
+  });
+
+  it("refreshes the saved board when the AI returns a board update", async () => {
+    const updatedBoard = structuredClone(initialData);
+    updatedBoard.cards["card-1"].title = "AI-updated roadmap";
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ reply: "I updated the card.", board_update: updatedBoard }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => updatedBoard,
+      });
+    renderBoard();
+    const user = userEvent.setup();
+
+    await user.type(
+      screen.getByLabelText("Message the AI assistant"),
+      "Rename the roadmap card"
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("AI-updated roadmap")).toBeVisible();
+    expect(await screen.findByText("I updated the card.")).toBeVisible();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/board",
+      expect.objectContaining({ credentials: "same-origin" })
+    );
+  });
+
+  it("shows an error when the AI request fails", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      json: async () => ({ detail: "AI returned an invalid board action." }),
+    });
+    renderBoard();
+    const user = userEvent.setup();
+
+    await user.type(
+      screen.getByLabelText("Message the AI assistant"),
+      "Summarize my board"
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "AI returned an invalid board action."
+    );
+  });
 });
