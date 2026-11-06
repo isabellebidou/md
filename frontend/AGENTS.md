@@ -3,9 +3,10 @@
 ## Existing app
 
 - This is a Next.js App Router app using React and TypeScript. The home route is `src/app/page.tsx`; shared layout and global styles are in `src/app/layout.tsx` and `src/app/globals.css`.
-- `src/components/` contains the Kanban board, columns, cards, preview, and new-card form. `KanbanBoard` currently owns in-memory board state and drag-and-drop behavior.
+- `src/components/AuthenticatedApp.tsx` checks the backend session and gates the board behind sign-in; it handles login and logout through FastAPI.
+- `src/components/` also contains the Kanban board, columns, cards, preview, and new-card form. `KanbanBoard` currently owns in-memory board state and drag-and-drop behavior.
 - `src/lib/kanban.ts` defines the board, column, and card types, sample board data, card-move logic, and ID creation.
-- The current demo is frontend-only: it has no sign-in, API persistence, or AI chat yet.
+- The board is still an in-memory demo; persistent board API integration and AI chat are planned later.
 
 ## Conventions
 
@@ -23,4 +24,4 @@ Run from `frontend/`:
 - `npm run test:e2e`
 - `npm run build`
 
-`npm run test:all` runs the unit and end-to-end suites together. Follow the project plan before changing the frontend build or connecting it to the backend.
+`npm run test:all` runs the unit and end-to-end suites together. The Playwright suite expects the Docker app to be running at port 8000, or `PLAYWRIGHT_BASE_URL` to point at another running app. Follow the project plan before changing the frontend build or backend integration.

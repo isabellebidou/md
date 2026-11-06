@@ -2,6 +2,8 @@
 
 Work through the parts in order. Check off implementation items as they are completed; do not begin a later part until the current part's success criteria pass. Any user sign-off is a gate, not an implementation task to skip.
 
+For tests, prioritize correctness, user-visible acceptance criteria, and security boundaries. When broader test matrices add little value, target roughly 80% of sensible test scenarios and record any omitted coverage; do not skip critical flows or required success criteria.
+
 ## Part 1: Plan and frontend orientation
 
 - [x] Expand this plan into ordered implementation checklists, tests, and success criteria.
@@ -28,36 +30,38 @@ Work through the parts in order. Check off implementation items as they are comp
 - [x] Request the hello-world API route and verify its documented response.
 - [x] Check script syntax where supported; verify the macOS start/stop scripts operate correctly.
 
-**Validation note:** Linux shell scripts passed `sh -n`. Windows batch scripts were inspected but could not be executed on this macOS host.
+**Validation note:** Linux shell scripts passed `sh -n`. Windows batch scripts were inspected but could not be executed on this macOS host; the user accepts these Windows and Linux execution tests as unneeded.
 
 **Success criteria:** A developer can start and stop the container using the appropriate script, load the temporary page, and receive a successful API response.
 
 ## Part 3: Add the frontend
 
-- [ ] Configure the existing Next.js app for a static production build compatible with FastAPI static serving.
-- [ ] Replace the temporary example page at `/` with the existing Kanban demo.
-- [ ] Preserve the current board interactions and visual design.
-- [ ] Serve the static build from FastAPI at `/` while keeping API routes available.
+- [x] Configure the existing Next.js app for a static production build compatible with FastAPI static serving.
+- [x] Replace the temporary example page at `/` in the production image with the existing Kanban demo.
+- [x] Preserve the current board interactions and visual design.
+- [x] Serve the static build from FastAPI at `/` while keeping API routes available.
 
 **Tests**
-- [ ] Run frontend lint and unit tests.
-- [ ] Run the frontend production build using the static export configuration.
-- [ ] Run Playwright against the container and verify the board loads at `/`, its five columns render, card creation works, and a card can be dragged between columns.
-- [ ] Verify API routes remain reachable alongside the static frontend.
+- [x] Run frontend lint and unit tests.
+- [x] Run the frontend production build using the static export configuration.
+- [x] Run Playwright against the container and verify the board loads at `/`, its five columns render, card creation works, and a card can be dragged between columns.
+- [x] Verify API routes remain reachable alongside the static frontend.
 
 **Success criteria:** The production container serves the existing interactive Kanban demo at `/` and its API without requiring a Next.js runtime server.
 
 ## Part 4: Add a demo sign-in experience
 
-- [ ] Add a sign-in screen that accepts the MVP credentials `user` / `password`.
-- [ ] Keep the board hidden until sign-in succeeds; show a clear error for invalid credentials.
-- [ ] Add logout and verify that it returns the user to the sign-in screen.
-- [ ] Use a backend-validated demo sign-in and a browser session cookie so the later board API can identify the signed-in user. This is demo authentication only, not production-grade security.
+- [x] Add a sign-in screen that accepts the MVP credentials `user` / `password`.
+- [x] Keep the board hidden until sign-in succeeds; show a clear error for invalid credentials.
+- [x] Add logout and verify that it returns the user to the sign-in screen.
+- [x] Use a backend-validated demo sign-in and a browser session cookie so the later board API can identify the signed-in user. This is demo authentication only, not production-grade security.
 
 **Tests**
-- [ ] Add frontend tests for initial signed-out state, successful sign-in, invalid credentials, and logout.
-- [ ] Add backend tests for accepted/rejected credentials and session behavior.
-- [ ] Add an end-to-end test covering sign-in, board access, reload/session behavior, and logout.
+- [x] Add focused frontend tests for signed-out state, successful and rejected sign-in, and logout.
+- [x] Add backend tests for accepted/rejected credentials, session cookie behavior, and logout.
+- [x] Add an end-to-end test covering sign-in, board access, session persistence on reload, and logout.
+
+**Validation:** Backend (6 tests), frontend unit (9 tests), lint, static production build, and all 5 Playwright tests passed against the Docker app.
 
 **Success criteria:** Only the demo credentials grant access to the board, invalid credentials do not, and logout removes access.
 
