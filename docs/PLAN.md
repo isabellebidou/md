@@ -110,6 +110,12 @@ For tests, prioritize correctness, user-visible acceptance criteria, and securit
 
 **Validation:** Frontend lint and production build passed; all 12 frontend unit tests, 13 backend tests, and 6 Playwright end-to-end tests passed. Browser coverage verifies card creation, editing, deletion, movement, and column rename persistence across reloads.
 
+**Design decisions and implementation notes**
+- After session validation or successful sign-in, the frontend fetches the authenticated user's board and renders it instead of the in-memory sample.
+- Board changes use a debounced, serialized `PUT /api/board`; the UI reports pending, saving, saved, or failed state and offers a retry after a failed save.
+- The database's seeded board is the initial state for a user with no saved board; the frontend does not use it as a fallback when a board request fails.
+- Card editing is inline. End-to-end persistence coverage verifies rename, create, edit, move, and delete across reloads; test-created data is restored or removed.
+
 **Success criteria:** Board operations persist across reloads, errors are visible, and the UI reflects the server's saved board.
 
 ## Part 8: AI connectivity
