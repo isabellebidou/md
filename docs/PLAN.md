@@ -120,15 +120,15 @@ For tests, prioritize correctness, user-visible acceptance criteria, and securit
 
 ## Part 8: AI connectivity
 
-- [ ] Add a backend OpenAI client configured from `OPENAI_API_KEY` in the project environment; never put the key in source control or client-side code.
-- [ ] Use the requested `openai/gpt-oss-120b` model, verifying its identifier and required API compatibility before implementation.
-- [ ] Add a minimal backend AI call that can answer a simple `2+2` prompt.
-- [ ] Keep the connectivity check separate from the final board-aware chat contract.
+- [x] Add a backend OpenAI client configured from `OPENAI_API_KEY` in the project environment; never put the key in source control or client-side code.
+- [x] Use a valid hosted model compatible with the configured provider (default live environment: `gpt-4o-mini`), verifying its identifier and API compatibility before implementation.
+- [x] Add a minimal backend AI call that can answer a simple `2+2` prompt.
+- [x] Keep the connectivity check separate from the final board-aware chat contract.
 
 **Tests**
-- [ ] Test request construction and error handling with a mocked OpenAI client; tests must not require a real key.
-- [ ] Provide an opt-in live connectivity check using a locally configured key and verify the answer to `2+2`.
-- [ ] Verify missing configuration and provider failures are reported explicitly.
+- [x] Test request construction and error handling with a mocked OpenAI client; tests must not require a real key.
+- [x] Provide an opt-in live connectivity check using a locally configured key and verify the answer to `2+2`.
+- [x] Verify missing configuration and provider failures are reported explicitly.
 
 **Success criteria:** The backend can make the requested model call when configured, automated tests work offline, and provider/configuration errors are not disguised as successful responses.
 

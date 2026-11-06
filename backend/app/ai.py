@@ -3,7 +3,7 @@ from typing import Any
 
 from openai import OpenAI, OpenAIError
 
-DEFAULT_OPENAI_MODEL = "openai/gpt-oss-120b"
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
 
 class AIConfigurationError(RuntimeError):

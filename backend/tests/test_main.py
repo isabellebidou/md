@@ -63,7 +63,7 @@ def test_ai_connectivity_check_returns_the_model_answer(
     response = client.get("/api/ai/test")
 
     assert response.status_code == 200
-    assert response.json() == {"answer": "4", "model": "openai/gpt-oss-120b"}
+    assert response.json() == {"answer": "4", "model": "gpt-4o-mini"}
 
 
 def test_ai_connectivity_check_requires_an_api_key(
