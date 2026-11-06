@@ -98,15 +98,17 @@ For tests, prioritize correctness, user-visible acceptance criteria, and securit
 
 ## Part 7: Connect frontend and backend
 
-- [ ] Load the signed-in user's board from the API instead of relying on in-memory sample state.
-- [ ] Persist column renames and card creation, editing, deletion, and drag-and-drop moves through the API.
-- [ ] Add clear loading and error feedback without hiding failed saves.
-- [ ] Retain the demo board only as an intentional initial/default state when creating the user's first board.
+- [x] Load the signed-in user's board from the API instead of relying on in-memory sample state.
+- [x] Persist column renames and card creation, editing, deletion, and drag-and-drop moves through the API.
+- [x] Add clear loading and error feedback without hiding failed saves.
+- [x] Retain the demo board only as an intentional initial/default state when creating the user's first board.
 
 **Tests**
-- [ ] Add frontend tests for API loading, successful mutations, and visible API failures.
-- [ ] Run backend tests and frontend lint/unit tests.
-- [ ] Add end-to-end coverage for board changes surviving a reload and remaining scoped to the signed-in user.
+- [x] Add frontend tests for API loading, successful mutations, and visible API failures.
+- [x] Run backend tests and frontend lint/unit tests.
+- [x] Add end-to-end coverage for board changes surviving a reload; backend tests verify authenticated, user-scoped board access.
+
+**Validation:** Frontend lint and production build passed; all 12 frontend unit tests, 13 backend tests, and 6 Playwright end-to-end tests passed. Browser coverage verifies card creation, editing, deletion, movement, and column rename persistence across reloads.
 
 **Success criteria:** Board operations persist across reloads, errors are visible, and the UI reflects the server's saved board.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -13,15 +13,22 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { createId, moveCard, type BoardData } from "@/lib/kanban";
 
 type KanbanBoardProps = {
+  initialBoard: BoardData;
   onLogout?: () => void;
 };
 
-export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
-  const [board, setBoard] = useState<BoardData>(() => initialData);
+export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
+  const [board, setBoard] = useState<BoardData>(() => initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">("saved");
+  const [saveError, setSaveError] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const boardVersion = useRef(0);
+  const persistedSnapshot = useRef(JSON.stringify(initialBoard));
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -30,6 +37,55 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
   );
 
   const cardsById = useMemo(() => board.cards, [board.cards]);
+
+  const updateBoard = (nextBoard: BoardData) => {
+    boardVersion.current += 1;
+    setBoard(nextBoard);
+    setSaveError("");
+    setSaveStatus("pending");
+    setRetryCount(0);
+  };
+
+  useEffect(() => {
+    const snapshot = JSON.stringify(board);
+    if (snapshot === persistedSnapshot.current && retryCount === 0) {
+      return;
+    }
+
+    const version = boardVersion.current;
+    const timeout = window.setTimeout(() => {
+      saveQueue.current = saveQueue.current.then(async () => {
+        if (version !== boardVersion.current) {
+          return;
+        }
+
+        setSaveStatus("saving");
+        try {
+          const response = await fetch("/api/board", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: snapshot,
+          });
+          if (!response.ok) {
+            throw new Error(`Board save failed (${response.status}).`);
+          }
+          persistedSnapshot.current = snapshot;
+          if (version === boardVersion.current) {
+            setSaveStatus("saved");
+            setSaveError("");
+          }
+        } catch {
+          if (version === boardVersion.current) {
+            setSaveStatus("error");
+            setSaveError("Your changes could not be saved.");
+          }
+        }
+      });
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [board, retryCount]);
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveCardId(event.active.id as string);
@@ -43,53 +99,61 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
       return;
     }
 
-    setBoard((prev) => ({
-      ...prev,
-      columns: moveCard(prev.columns, active.id as string, over.id as string),
-    }));
+    updateBoard({
+      ...board,
+      columns: moveCard(board.columns, active.id as string, over.id as string),
+    });
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
-      ...prev,
-      columns: prev.columns.map((column) =>
+    updateBoard({
+      ...board,
+      columns: board.columns.map((column) =>
         column.id === columnId ? { ...column, title } : column
       ),
-    }));
+    });
   };
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
-    setBoard((prev) => ({
-      ...prev,
+    updateBoard({
+      ...board,
       cards: {
-        ...prev.cards,
+        ...board.cards,
         [id]: { id, title, details: details || "No details yet." },
       },
-      columns: prev.columns.map((column) =>
+      columns: board.columns.map((column) =>
         column.id === columnId
           ? { ...column, cardIds: [...column.cardIds, id] }
           : column
       ),
-    }));
+    });
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
-    setBoard((prev) => {
-      return {
-        ...prev,
-        cards: Object.fromEntries(
-          Object.entries(prev.cards).filter(([id]) => id !== cardId)
-        ),
-        columns: prev.columns.map((column) =>
-          column.id === columnId
-            ? {
-                ...column,
-                cardIds: column.cardIds.filter((id) => id !== cardId),
-              }
-            : column
-        ),
-      };
+    updateBoard({
+      ...board,
+      cards: Object.fromEntries(
+        Object.entries(board.cards).filter(([id]) => id !== cardId)
+      ),
+      columns: board.columns.map((column) =>
+        column.id === columnId
+          ? {
+              ...column,
+              cardIds: column.cardIds.filter((id) => id !== cardId),
+            }
+          : column
+      ),
+    });
+  };
+
+  const handleEditCard = (cardId: string, title: string, details: string) => {
+    updateBoard({
+      ...board,
+      cards: {
+        ...board.cards,
+        [cardId]: { ...board.cards[cardId], title, details },
+      },
     });
   };
 
@@ -144,6 +208,26 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
               </div>
             ))}
           </div>
+          <div className="flex items-center gap-3 text-sm">
+            <p role={saveStatus === "error" ? "alert" : "status"} className={saveStatus === "error" ? "text-red-700" : "text-[var(--gray-text)]"}>
+              {saveStatus === "error"
+                ? saveError
+                : saveStatus === "saving"
+                  ? "Saving changes..."
+                  : saveStatus === "pending"
+                    ? "Unsaved changes"
+                    : "All changes saved"}
+            </p>
+            {saveStatus === "error" && (
+              <button
+                type="button"
+                onClick={() => setRetryCount((count) => count + 1)}
+                className="font-semibold text-[var(--primary-blue)] underline"
+              >
+                Retry save
+              </button>
+            )}
+          </div>
         </header>
 
         <DndContext
@@ -161,6 +245,7 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
                 onDeleteCard={handleDeleteCard}
+                onEditCard={handleEditCard}
               />
             ))}
           </section>

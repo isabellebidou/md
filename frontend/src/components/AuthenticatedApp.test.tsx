@@ -2,10 +2,12 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthenticatedApp } from "@/components/AuthenticatedApp";
+import { initialData } from "@/lib/kanban";
 
-const response = (status: number) => ({
+const response = (status: number, body?: unknown) => ({
   ok: status >= 200 && status < 300,
   status,
+  json: async () => body,
 });
 
 describe("AuthenticatedApp", () => {
@@ -51,6 +53,7 @@ describe("AuthenticatedApp", () => {
     fetchMock
       .mockResolvedValueOnce(response(401))
       .mockResolvedValueOnce(response(200))
+      .mockResolvedValueOnce(response(200, initialData))
       .mockResolvedValueOnce(response(204));
 
     render(<AuthenticatedApp />);

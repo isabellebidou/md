@@ -2,11 +2,21 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import type { BoardData } from "@/lib/kanban";
 
 type AuthState = "checking" | "signed-out" | "signed-in" | "unavailable";
 
+const getBoard = async (): Promise<BoardData> => {
+  const response = await fetch("/api/board", { credentials: "same-origin" });
+  if (!response.ok) {
+    throw new Error(`Board request failed (${response.status}).`);
+  }
+  return response.json();
+};
+
 export const AuthenticatedApp = () => {
   const [authState, setAuthState] = useState<AuthState>("checking");
+  const [board, setBoard] = useState<BoardData | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -26,6 +36,7 @@ export const AuthenticatedApp = () => {
       if (!response.ok) {
         throw new Error(`Session check failed (${response.status}).`);
       }
+      setBoard(await getBoard());
       setAuthState("signed-in");
     } catch {
       setError("Unable to connect to the server. Please try again.");
@@ -55,6 +66,7 @@ export const AuthenticatedApp = () => {
       if (!response.ok) {
         throw new Error(`Sign-in failed (${response.status}).`);
       }
+      setBoard(await getBoard());
       setPassword("");
       setAuthState("signed-in");
     } catch {
@@ -74,6 +86,7 @@ export const AuthenticatedApp = () => {
       if (!response.ok) {
         throw new Error(`Logout failed (${response.status}).`);
       }
+      setBoard(null);
       setPassword("");
       setAuthState("signed-out");
     } catch {
@@ -116,7 +129,7 @@ export const AuthenticatedApp = () => {
             {error}
           </p>
         )}
-        <KanbanBoard onLogout={handleLogout} />
+        {board && <KanbanBoard initialBoard={board} onLogout={handleLogout} />}
       </>
     );
   }
