@@ -356,11 +356,12 @@ describe("KanbanCard", () => {
   it("shows the current card data when editing after a prop change", async () => {
     const card = { id: "card-x", title: "Old title", details: "Old details" };
     const { rerender } = render(
-      <KanbanCard card={card} onDelete={vi.fn()} onEdit={vi.fn()} />
+      <KanbanCard card={card} dueStatus="none" onDelete={vi.fn()} onEdit={vi.fn()} />
     );
     rerender(
       <KanbanCard
         card={{ ...card, title: "AI title", details: "AI details" }}
+        dueStatus="none"
         onDelete={vi.fn()}
         onEdit={vi.fn()}
       />
@@ -370,5 +371,147 @@ describe("KanbanCard", () => {
 
     expect(screen.getByRole("textbox", { name: "Card title" })).toHaveValue("AI title");
     expect(screen.getByRole("textbox", { name: "Card details" })).toHaveValue("AI details");
+  });
+});
+
+describe("KanbanBoard due dates", () => {
+  const boardWithDue = (cardId: string, dueDate: string) => {
+    const board = structuredClone(boardFixture);
+    board.cards[cardId].dueDate = dueDate;
+    return board;
+  };
+  const lastSavedBoard = () =>
+    JSON.parse(fetchMock.mock.calls.at(-1)![1].body) as typeof boardFixture;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 10, 10, 12, 0));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("creates a card with a due date", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+    const column = getFirstColumn();
+    await user.click(within(column).getByRole("button", { name: /add a card/i }));
+    await user.type(within(column).getByPlaceholderText(/card title/i), "Workout");
+    await user.type(within(column).getByLabelText("Due date (optional)"), "2026-11-11");
+    await user.click(within(column).getByRole("button", { name: /add card/i }));
+
+    expect(await screen.findByText("All changes saved")).toBeVisible();
+    const saved = Object.values(lastSavedBoard().cards).find(
+      (card) => card.title === "Workout"
+    );
+    expect(saved?.dueDate).toBe("2026-11-11");
+    expect(within(column).getByText(/Due 11 Nov - Due soon/)).toBeVisible();
+  });
+
+  it("creates a card without a due date", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+    const column = getFirstColumn();
+    await user.click(within(column).getByRole("button", { name: /add a card/i }));
+    await user.type(within(column).getByPlaceholderText(/card title/i), "Undated");
+    await user.click(within(column).getByRole("button", { name: /add card/i }));
+
+    expect(await screen.findByText("All changes saved")).toBeVisible();
+    const saved = Object.values(lastSavedBoard().cards).find(
+      (card) => card.title === "Undated"
+    );
+    expect(saved?.dueDate).toBeNull();
+  });
+
+  it("adds, changes, and clears a due date through the editor", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+    const card = screen.getByTestId("card-card-1");
+    const editDate = async (value: string) => {
+      await user.click(within(card).getByRole("button", { name: /^Edit / }));
+      const input = within(card).getByLabelText("Due date (optional)");
+      await user.clear(input);
+      if (value) {
+        await user.type(input, value);
+      }
+      await user.click(within(card).getByRole("button", { name: "Save" }));
+    };
+
+    await editDate("2026-11-12");
+    expect(card).toHaveAttribute("data-due-status", "soon");
+    await editDate("2026-11-09");
+    expect(card).toHaveAttribute("data-due-status", "overdue");
+    expect(within(card).getByText("Due 9 Nov - Overdue")).toBeVisible();
+    await editDate("2026-11-20");
+    expect(card).toHaveAttribute("data-due-status", "none");
+    expect(within(card).getByText("Due 20 Nov")).toBeVisible();
+    await editDate("");
+    expect(card).toHaveAttribute("data-due-status", "none");
+    expect(within(card).queryByText(/Due /)).not.toBeInTheDocument();
+
+    expect(await screen.findByText("All changes saved")).toBeVisible();
+    expect(lastSavedBoard().cards["card-1"].dueDate).toBeNull();
+  });
+
+  it("shows status by column", () => {
+    const board = structuredClone(boardFixture);
+    board.cards["card-1"].dueDate = "2026-11-11";
+    board.cards["card-6"].dueDate = "2026-11-11";
+    board.cards["card-7"].dueDate = "2026-11-01";
+    board.cards["card-2"].dueDate = "2026-11-20";
+    render(<KanbanBoard initialBoard={board} />);
+
+    expect(screen.getByTestId("card-card-1")).toHaveAttribute("data-due-status", "soon");
+    expect(screen.getByTestId("card-card-6")).toHaveAttribute("data-due-status", "none");
+    expect(screen.getByTestId("card-card-7")).toHaveAttribute("data-due-status", "none");
+    expect(screen.getByTestId("card-card-2")).toHaveAttribute("data-due-status", "none");
+    expect(screen.getByTestId("card-card-2")).toHaveTextContent("Due 20 Nov");
+    expect(screen.getByTestId("card-card-3")).not.toHaveTextContent("Due");
+  });
+
+  it("turns red after midnight without a reload", async () => {
+    vi.setSystemTime(new Date(2026, 10, 10, 23, 59, 0));
+    render(<KanbanBoard initialBoard={boardWithDue("card-1", "2026-11-10")} />);
+    const card = screen.getByTestId("card-card-1");
+    expect(card).toHaveAttribute("data-due-status", "soon");
+
+    await act(async () => {
+      vi.advanceTimersByTime(2 * 60 * 1000);
+    });
+
+    expect(card).toHaveAttribute("data-due-status", "overdue");
+  });
+
+  it("updates when the tab becomes visible after the clock jumps", async () => {
+    render(<KanbanBoard initialBoard={boardWithDue("card-1", "2026-11-12")} />);
+    const card = screen.getByTestId("card-card-1");
+    expect(card).toHaveAttribute("data-due-status", "soon");
+
+    vi.setSystemTime(new Date(2026, 10, 14, 8, 0));
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(card).toHaveAttribute("data-due-status", "overdue");
+  });
+
+  it("clears the colour when the assistant postpones the date", async () => {
+    const postponed = boardWithDue("card-1", "2026-11-30");
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ reply: "Postponed.", board_update: postponed }),
+    });
+    render(<KanbanBoard initialBoard={boardWithDue("card-1", "2026-11-01")} />);
+    const user = userEvent.setup();
+    expect(screen.getByTestId("card-card-1")).toHaveAttribute("data-due-status", "overdue");
+
+    await user.type(screen.getByLabelText("Message the AI assistant"), "Postpone");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Postponed.")).toBeVisible();
+    expect(screen.getByTestId("card-card-1")).toHaveAttribute("data-due-status", "none");
+    expect(screen.getByTestId("card-card-1")).toHaveTextContent("Due 30 Nov");
   });
 });

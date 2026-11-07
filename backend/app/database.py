@@ -124,6 +124,7 @@ def initialize_database(database_path: Path | None = None) -> None:
                 position INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 details TEXT NOT NULL,
+                due_date TEXT,
                 PRIMARY KEY (board_id, id),
                 UNIQUE (board_id, column_id, position),
                 FOREIGN KEY (board_id, column_id)
@@ -131,6 +132,11 @@ def initialize_database(database_path: Path | None = None) -> None:
             );
             """
         )
+        card_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(cards)")
+        }
+        if "due_date" not in card_columns:
+            connection.execute("ALTER TABLE cards ADD COLUMN due_date TEXT")
         connection.execute(
             "INSERT OR IGNORE INTO users (id, username) VALUES ('user', 'user')"
         )
@@ -207,7 +213,7 @@ def get_board(username: str, database_path: Path | None = None) -> dict | None:
         cards = {}
         rows = connection.execute(
             """
-            SELECT cards.id, cards.title, cards.details, cards.column_id
+            SELECT cards.id, cards.title, cards.details, cards.due_date, cards.column_id
             FROM cards
             JOIN columns
               ON columns.board_id = cards.board_id
@@ -222,6 +228,7 @@ def get_board(username: str, database_path: Path | None = None) -> dict | None:
                 "id": card["id"],
                 "title": card["title"],
                 "details": card["details"],
+                "dueDate": card["due_date"],
             }
             columns_by_id[card["column_id"]]["cardIds"].append(card["id"])
 
@@ -269,8 +276,9 @@ def save_board(
             )
             connection.executemany(
                 """
-                INSERT INTO cards (board_id, id, column_id, position, title, details)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO cards
+                    (board_id, id, column_id, position, title, details, due_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -280,6 +288,7 @@ def save_board(
                         position,
                         board["cards"][card_id]["title"],
                         board["cards"][card_id]["details"],
+                        board["cards"][card_id].get("dueDate"),
                     )
                     for position, card_id in enumerate(column["cardIds"])
                 ],

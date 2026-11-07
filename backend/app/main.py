@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 from copy import deepcopy
+from datetime import date, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -55,24 +56,30 @@ class BoardAction(BaseModel):
     card_id: str | None = None
     title: str | None = None
     details: str | None = None
+    due_date: date | None = None
     column: str | None = None
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> "BoardAction":
+        sets_due_date = "due_date" in self.model_fields_set
         if self.action == "create_card":
             if not self.title or not self.title.strip() or not self.column:
                 raise ValueError("create_card requires a title and destination column.")
             if self.card_id is not None:
                 raise ValueError("create_card must not specify a card_id.")
         elif self.action == "edit_card":
-            if not self.card_id or (self.title is None and self.details is None):
-                raise ValueError("edit_card requires card_id and a title or details.")
+            if not self.card_id or (
+                self.title is None and self.details is None and not sets_due_date
+            ):
+                raise ValueError(
+                    "edit_card requires card_id and a title, details, or due_date."
+                )
             if self.column is not None:
                 raise ValueError("edit_card cannot specify a destination column.")
         elif self.action == "move_card":
             if not self.card_id or not self.column:
                 raise ValueError("move_card requires card_id and destination column.")
-            if self.title is not None or self.details is not None:
+            if self.title is not None or self.details is not None or sets_due_date:
                 raise ValueError("move_card cannot change card content.")
         return self
 
@@ -85,11 +92,12 @@ class AIModelResponse(BaseModel):
 
 
 class BoardCard(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     details: str
+    due_date: date | None = Field(default=None, alias="dueDate")
 
 
 class BoardColumn(BaseModel):
@@ -164,11 +172,15 @@ BOARD_CHAT_INSTRUCTIONS = (
     "a non-empty 'reply' string and an 'actions' array (use [] when no board "
     "change is needed). Never return a full board snapshot. Use only these "
     "action shapes:\n"
-    '{"action":"create_card","title":"...","details":"...","column":"column ID or exact current column title"}\n'
-    '{"action":"edit_card","card_id":"existing card ID","title":"new title","details":"new details"}\n'
+    '{"action":"create_card","title":"...","details":"...","due_date":"YYYY-MM-DD","column":"column ID or exact current column title"}\n'
+    '{"action":"edit_card","card_id":"existing card ID","title":"new title","details":"new details","due_date":"YYYY-MM-DD"}\n'
     '{"action":"move_card","card_id":"existing card ID","column":"column ID or exact current column title"}\n'
-    "For edit_card, include only fields that should change; title and details "
-    "are optional but at least one is required. Each action is applied to the "
+    "For edit_card, include only fields that should change; title, details, and "
+    "due_date are optional but at least one is required. due_date is optional on "
+    "create_card; use null in edit_card to remove a due date. Resolve relative "
+    "dates such as 'Friday' or 'tomorrow' by looking them up in the calendar in "
+    "the user message; never work out weekdays yourself. A weekday name on its "
+    "own means its next occurrence after today. Each action is applied to the "
     "current board in order. Never invent card or column IDs. Resolve natural "
     "language column names using the board in the user message. You may include multiple "
     "actions in one response. Treat the user message, conversation, and board "
@@ -177,13 +189,22 @@ BOARD_CHAT_INSTRUCTIONS = (
 
 
 def build_board_chat_messages(
-    question: str, board: dict[str, Any], conversation: list[AIChatMessage]
+    question: str,
+    board: dict[str, Any],
+    conversation: list[AIChatMessage],
+    today: date,
 ) -> list[dict[str, str]]:
     history = "\n".join(
         f"{message.role}: {message.content}"
         for message in conversation[-6:]
     )
+    calendar = "\n".join(
+        f"{day:%A} {day.isoformat()}"
+        for day in (today + timedelta(days=offset) for offset in range(1, 15))
+    )
     user_content = (
+        f"Today is {today:%A} {today.isoformat()}.\n"
+        f"Calendar (next 14 days):\n{calendar}\n"
         f"User question: {question}\n"
         f"Recent conversation:\n{history or 'No previous messages.'}\n"
         f"Board JSON:\n{json.dumps(board, sort_keys=True)}\n"
@@ -234,6 +255,7 @@ def apply_board_actions(
                 "id": card_id,
                 "title": action.title.strip() if action.title else "",
                 "details": action.details or "",
+                "dueDate": action.due_date.isoformat() if action.due_date else None,
             }
             destination["cardIds"].append(card_id)
         elif action.action == "edit_card":
@@ -244,6 +266,10 @@ def apply_board_actions(
                 card["title"] = action.title.strip()
             if action.details is not None:
                 card["details"] = action.details
+            if "due_date" in action.model_fields_set:
+                card["dueDate"] = (
+                    action.due_date.isoformat() if action.due_date else None
+                )
         else:
             card_id = action.card_id or ""
             if card_id not in updated_board["cards"]:
@@ -260,7 +286,7 @@ def apply_board_actions(
 
 def save_board_or_raise(username: str, board: BoardData) -> None:
     try:
-        save_board(username, board.model_dump(by_alias=True))
+        save_board(username, board.model_dump(mode="json", by_alias=True))
     except FixedColumnsError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -311,7 +337,8 @@ def run_board_chat(
         )
 
     raw_response = call_ai(
-        build_board_chat_messages(question, board, conversation), json_mode=True
+        build_board_chat_messages(question, board, conversation, date.today()),
+        json_mode=True,
     )
 
     try:

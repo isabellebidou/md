@@ -97,6 +97,11 @@
         },
         "details": {
           "type": "string"
+        },
+        "dueDate": {
+          "description": "Optional calendar due date (YYYY-MM-DD); null or absent means no date.",
+          "type": ["string", "null"],
+          "format": "date"
         }
       }
     },

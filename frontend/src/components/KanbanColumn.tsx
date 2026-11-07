@@ -2,22 +2,34 @@ import { useState } from "react";
 import clsx from "clsx";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Card, Column } from "@/lib/kanban";
+import { getDueStatus, type Card, type Column } from "@/lib/kanban";
 import { KanbanCard } from "@/components/KanbanCard";
 import { NewCardForm } from "@/components/NewCardForm";
 
 type KanbanColumnProps = {
   column: Column;
   cards: Card[];
+  today: string;
   onRename: (columnId: string, title: string) => void;
-  onAddCard: (columnId: string, title: string, details: string) => void;
+  onAddCard: (
+    columnId: string,
+    title: string,
+    details: string,
+    dueDate: string | null
+  ) => void;
   onDeleteCard: (columnId: string, cardId: string) => void;
-  onEditCard: (cardId: string, title: string, details: string) => void;
+  onEditCard: (
+    cardId: string,
+    title: string,
+    details: string,
+    dueDate: string | null
+  ) => void;
 };
 
 export const KanbanColumn = ({
   column,
   cards,
+  today,
   onRename,
   onAddCard,
   onDeleteCard,
@@ -71,6 +83,7 @@ export const KanbanColumn = ({
             <KanbanCard
               key={card.id}
               card={card}
+              dueStatus={getDueStatus(card.dueDate, column.id, today)}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
               onEdit={onEditCard}
             />
@@ -83,7 +96,9 @@ export const KanbanColumn = ({
         )}
       </div>
       <NewCardForm
-        onAdd={(title, details) => onAddCard(column.id, title, details)}
+        onAdd={(title, details, dueDate) =>
+          onAddCard(column.id, title, details, dueDate)
+        }
       />
     </section>
   );

@@ -233,6 +233,7 @@ def test_ai_chat_edits_and_moves_a_card(
         "id": "card-1",
         "title": "Blue ring",
         "details": "Updated by the assistant.",
+        "dueDate": None,
     }
     assert "card-1" in saved_board["columns"][1]["cardIds"]
     assert all(
@@ -536,3 +537,189 @@ def test_blank_openai_model_uses_default(monkeypatch: pytest.MonkeyPatch) -> Non
     assert get_model() == "gpt-4o-mini"
     monkeypatch.setenv("OPENAI_MODEL", "gpt-other")
     assert get_model() == "gpt-other"
+
+
+def ai_returns(monkeypatch: pytest.MonkeyPatch, payload: dict, captured: dict | None = None) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_get_ai_response(messages, *, json_mode=False) -> str:
+        if captured is not None:
+            captured["messages"] = messages
+        return json.dumps(payload)
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+
+
+def test_board_due_dates_persist_and_can_be_cleared(client: TestClient) -> None:
+    sign_in(client)
+    board = client.get("/api/board").json()
+    assert board["cards"]["card-1"]["dueDate"] is None
+
+    board["cards"]["card-1"]["dueDate"] = "2026-11-12"
+    del board["cards"]["card-2"]["dueDate"]
+    response = client.put("/api/board", json=board)
+
+    assert response.status_code == 200
+    saved = client.get("/api/board").json()
+    assert saved["cards"]["card-1"]["dueDate"] == "2026-11-12"
+    assert saved["cards"]["card-2"]["dueDate"] is None
+
+    saved["cards"]["card-1"]["dueDate"] = None
+    assert client.put("/api/board", json=saved).status_code == 200
+    assert client.get("/api/board").json()["cards"]["card-1"]["dueDate"] is None
+
+
+@pytest.mark.parametrize("due_date", ["2026-02-30", "tomorrow", "12/11/2026"])
+def test_board_rejects_invalid_due_dates(client: TestClient, due_date: str) -> None:
+    sign_in(client)
+    board = client.get("/api/board").json()
+    board["cards"]["card-1"]["dueDate"] = due_date
+
+    assert client.put("/api/board", json=board).status_code == 422
+    assert client.get("/api/board").json()["cards"]["card-1"]["dueDate"] is None
+
+
+def test_initialize_database_adds_due_date_to_an_old_schema(database_path: Path) -> None:
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT 'now');
+            CREATE TABLE boards (id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE);
+            CREATE TABLE columns (board_id TEXT NOT NULL, id TEXT NOT NULL,
+                title TEXT NOT NULL, position INTEGER NOT NULL,
+                PRIMARY KEY (board_id, id));
+            CREATE TABLE cards (board_id TEXT NOT NULL, id TEXT NOT NULL,
+                column_id TEXT NOT NULL, position INTEGER NOT NULL,
+                title TEXT NOT NULL, details TEXT NOT NULL,
+                PRIMARY KEY (board_id, id));
+            INSERT INTO users (id, username) VALUES ('user', 'user');
+            INSERT INTO boards VALUES ('board-user', 'user');
+            INSERT INTO columns VALUES
+                ('board-user', 'col-backlog', 'Backlog', 0),
+                ('board-user', 'col-discovery', 'Discovery', 1),
+                ('board-user', 'col-progress', 'In Progress', 2),
+                ('board-user', 'col-review', 'Review', 3),
+                ('board-user', 'col-done', 'Done', 4);
+            INSERT INTO cards VALUES
+                ('board-user', 'old-card', 'col-backlog', 0, 'Old card', 'Kept');
+            """
+        )
+
+    initialize_database(database_path)
+
+    board = get_board("user", database_path)
+    assert board is not None
+    assert board["cards"] == {
+        "old-card": {"id": "old-card", "title": "Old card", "details": "Kept", "dueDate": None}
+    }
+    initialize_database(database_path)
+
+
+def test_ai_chat_sets_and_clears_due_dates(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sign_in(client)
+    ai_returns(monkeypatch, {
+        "reply": "Done.",
+        "actions": [
+            {"action": "create_card", "title": "Workout", "details": "", "due_date": "2026-11-20", "column": "Backlog"},
+            {"action": "edit_card", "card_id": "card-2", "due_date": "2026-11-15"},
+        ],
+    })
+    response = client.post("/api/ai/chat", json={"question": "Add dates"})
+
+    assert response.status_code == 200
+    board = client.get("/api/board").json()
+    created_id = board["columns"][0]["cardIds"][-1]
+    assert board["cards"][created_id]["dueDate"] == "2026-11-20"
+    assert board["cards"]["card-2"]["dueDate"] == "2026-11-15"
+    assert board["cards"]["card-2"]["title"] == "Gather customer signals"
+
+    ai_returns(monkeypatch, {
+        "reply": "Cleared.",
+        "actions": [{"action": "edit_card", "card_id": "card-2", "due_date": None}],
+    })
+    response = client.post("/api/ai/chat", json={"question": "Remove the date"})
+
+    assert response.status_code == 200
+    assert response.json()["board_update"]["cards"]["card-2"]["dueDate"] is None
+    assert client.get("/api/board").json()["cards"]["card-2"]["dueDate"] is None
+
+
+def test_ai_chat_edit_without_due_date_keeps_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sign_in(client)
+    board = client.get("/api/board").json()
+    board["cards"]["card-1"]["dueDate"] = "2026-11-12"
+    client.put("/api/board", json=board)
+    ai_returns(monkeypatch, {
+        "reply": "Renamed.",
+        "actions": [{"action": "edit_card", "card_id": "card-1", "title": "Renamed"}],
+    })
+
+    client.post("/api/ai/chat", json={"question": "Rename"})
+
+    assert client.get("/api/board").json()["cards"]["card-1"] == {
+        "id": "card-1",
+        "title": "Renamed",
+        "details": "Draft quarterly themes with impact statements and metrics.",
+        "dueDate": "2026-11-12",
+    }
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"action": "edit_card", "card_id": "card-1", "due_date": "next week"},
+        {"action": "move_card", "card_id": "card-1", "column": "Done", "due_date": "2026-11-12"},
+    ],
+)
+def test_ai_chat_rejects_invalid_due_date_actions(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, action: dict
+) -> None:
+    sign_in(client)
+    ai_returns(monkeypatch, {"reply": "Ok.", "actions": [action]})
+
+    response = client.post("/api/ai/chat", json={"question": "Date"})
+
+    assert response.status_code == 502
+    assert client.get("/api/board").json()["cards"]["card-1"]["dueDate"] is None
+
+
+def test_ai_chat_prompt_includes_today_and_due_date_shape(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import date
+
+    sign_in(client)
+    captured: dict = {}
+    ai_returns(monkeypatch, {"reply": "Hi.", "actions": []}, captured)
+
+    client.post("/api/ai/chat", json={"question": "Due Friday"})
+
+    system, user = captured["messages"]
+    assert '"due_date":"YYYY-MM-DD"' in system["content"]
+    assert "use null in edit_card to remove a due date" in system["content"]
+    assert "never work out weekdays yourself" in system["content"]
+    today = date.today()
+    assert f"Today is {today:%A} {today.isoformat()}." in user["content"]
+
+
+def test_board_chat_calendar_lists_the_next_two_weeks() -> None:
+    from datetime import date
+
+    from app.main import build_board_chat_messages
+
+    _, user = build_board_chat_messages(
+        "Due Friday", {"columns": [], "cards": {}}, [], date(2026, 11, 7)
+    )
+
+    assert "Today is Saturday 2026-11-07." in user["content"]
+    calendar = user["content"].split("Calendar (next 14 days):\n")[1].split("\nUser question")[0]
+    lines = calendar.splitlines()
+    assert lines[0] == "Sunday 2026-11-08"
+    assert "Friday 2026-11-13" in lines
+    assert lines[-1] == "Saturday 2026-11-21"
+    assert len(lines) == 14

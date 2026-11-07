@@ -6,6 +6,12 @@
   --secondary-purple: #753991;
   --navy-dark: #032147;
   --gray-text: #888888;
+  --due-soon: #d97706;
+  --due-soon-tint: #fef3c7;
+  --due-soon-text: #92400e;
+  --due-overdue: #dc2626;
+  --due-overdue-tint: #fef2f2;
+  --due-overdue-text: #b91c1c;
   --surface: #f7f8fb;
   --surface-strong: #ffffff;
   --stroke: rgba(3, 33, 71, 0.08);

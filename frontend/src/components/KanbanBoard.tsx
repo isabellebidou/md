@@ -19,7 +19,8 @@ import clsx from "clsx";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AIChatSidebar } from "@/components/AIChatSidebar";
-import { createId, moveCard, type BoardData } from "@/lib/kanban";
+import { createId, getDueStatus, moveCard, type BoardData } from "@/lib/kanban";
+import { useToday } from "@/lib/useToday";
 
 type KanbanBoardProps = {
   initialBoard: BoardData;
@@ -38,6 +39,7 @@ export const KanbanBoard = ({
   const [saveError, setSaveError] = useState("");
   const [retryCount, setRetryCount] = useState(0);
   const [isAIPending, setIsAIPending] = useState(false);
+  const today = useToday();
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const boardVersion = useRef(0);
   const persistedSnapshot = useRef(JSON.stringify(initialBoard));
@@ -139,13 +141,18 @@ export const KanbanBoard = ({
     });
   };
 
-  const handleAddCard = (columnId: string, title: string, details: string) => {
+  const handleAddCard = (
+    columnId: string,
+    title: string,
+    details: string,
+    dueDate: string | null
+  ) => {
     const id = createId("card");
     updateBoard({
       ...board,
       cards: {
         ...board.cards,
-        [id]: { id, title, details },
+        [id]: { id, title, details, dueDate },
       },
       columns: board.columns.map((column) =>
         column.id === columnId
@@ -172,12 +179,17 @@ export const KanbanBoard = ({
     });
   };
 
-  const handleEditCard = (cardId: string, title: string, details: string) => {
+  const handleEditCard = (
+    cardId: string,
+    title: string,
+    details: string,
+    dueDate: string | null
+  ) => {
     updateBoard({
       ...board,
       cards: {
         ...board.cards,
-        [cardId]: { ...board.cards[cardId], title, details },
+        [cardId]: { ...board.cards[cardId], title, details, dueDate },
       },
     });
   };
@@ -192,6 +204,9 @@ export const KanbanBoard = ({
   };
 
   const activeCard = activeCardId ? board.cards[activeCardId] : null;
+  const activeColumnId = board.columns.find((column) =>
+    column.cardIds.includes(activeCardId ?? "")
+  )?.id;
 
   return (
     <div className="relative overflow-hidden">
@@ -291,6 +306,7 @@ export const KanbanBoard = ({
                     key={column.id}
                     column={column}
                     cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                    today={today}
                     onRename={handleRenameColumn}
                     onAddCard={handleAddCard}
                     onDeleteCard={handleDeleteCard}
@@ -309,7 +325,10 @@ export const KanbanBoard = ({
           <DragOverlay>
             {activeCard ? (
               <div className="w-[260px]">
-                <KanbanCardPreview card={activeCard} />
+                <KanbanCardPreview
+                  card={activeCard}
+                  dueStatus={getDueStatus(activeCard.dueDate, activeColumnId ?? "", today)}
+                />
               </div>
             ) : null}
           </DragOverlay>

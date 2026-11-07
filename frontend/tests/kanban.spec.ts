@@ -481,3 +481,121 @@ test("moves a card with the keyboard", async ({ page }) => {
     }, originalBoard);
   }
 });
+
+const localDate = (offsetDays: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+};
+
+const withRestoredBoard = async (
+  page: Page,
+  run: (board: { columns: { id: string; cardIds: string[] }[]; cards: Record<string, { id: string; title: string; details: string; dueDate?: string | null }> }) => Promise<void>
+) => {
+  const originalBoard = await page.evaluate(async () => {
+    const response = await fetch("/api/board");
+    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
+    return response.json();
+  });
+  try {
+    await run(structuredClone(originalBoard));
+  } finally {
+    await page.evaluate(async (board) => {
+      const response = await fetch("/api/board", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(board),
+      });
+      if (!response.ok) throw new Error("Unable to restore board after test.");
+    }, originalBoard);
+  }
+};
+
+const putBoard = (page: Page, board: unknown) =>
+  page.evaluate(async (body) => {
+    const response = await fetch("/api/board", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error("Unable to set up board.");
+  }, board);
+
+test("creates a card with a due date that persists", async ({ page }) => {
+  await signIn(page);
+  await withRestoredBoard(page, async () => {
+    const column = page.getByTestId("column-col-backlog");
+    const title = `Dated card ${Date.now()}`;
+    await column.getByRole("button", { name: /add a card/i }).click();
+    await column.getByPlaceholder("Card title").fill(title);
+    await column.getByLabel("Due date (optional)").fill(localDate(2));
+    await column.getByRole("button", { name: /add card/i }).click();
+    await expect(page.getByText("All changes saved")).toBeVisible();
+
+    await page.reload();
+    const card = page.locator("article").filter({ hasText: title });
+    await expect(card).toHaveAttribute("data-due-status", "soon");
+    await expect(card).toContainText("Due soon");
+    const styles = await card.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [style.backgroundColor, style.borderLeftColor];
+    });
+    expect(styles).toEqual(["rgb(254, 243, 199)", "rgb(217, 119, 6)"]);
+  });
+});
+
+test("overdue cards lose their colour when done or postponed", async ({ page }) => {
+  await signIn(page);
+  await withRestoredBoard(page, async (board) => {
+    const backlog = board.columns.find((column) => column.id === "col-backlog")!;
+    const stamp = Date.now();
+    const firstId = `e2e-overdue-${stamp}-a`;
+    const secondId = `e2e-overdue-${stamp}-b`;
+    for (const id of [firstId, secondId]) {
+      board.cards[id] = { id, title: `E2E ${id}`, details: "", dueDate: localDate(-1) };
+    }
+    backlog.cardIds.unshift(firstId, secondId);
+    await putBoard(page, board);
+    await page.reload();
+
+    const first = page.getByTestId(`card-${firstId}`);
+    const second = page.getByTestId(`card-${secondId}`);
+    await expect(first).toHaveAttribute("data-due-status", "overdue");
+    await expect(first).toContainText("Overdue");
+    const styles = await first.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [style.backgroundColor, style.borderLeftColor];
+    });
+    expect(styles).toEqual(["rgb(254, 242, 242)", "rgb(220, 38, 38)"]);
+
+    const doneColumn = page.getByTestId("column-col-done");
+    const cardBox = await first.boundingBox();
+    const doneBox = await doneColumn.boundingBox();
+    if (!cardBox || !doneBox) throw new Error("Unable to resolve drag coordinates.");
+    await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(doneBox.x + doneBox.width / 2, doneBox.y + 120, { steps: 12 });
+    await page.mouse.up();
+    await expect(doneColumn.getByTestId(`card-${firstId}`)).toHaveAttribute(
+      "data-due-status",
+      "none"
+    );
+    // dnd-kit swallows clicks for 50ms after a drop; the debounced save takes longer.
+    await expect(page.getByText("All changes saved")).toBeVisible();
+
+    await second.getByRole("button", { name: /^Edit / }).click();
+    await second.getByLabel("Due date (optional)").fill(localDate(10));
+    await second.getByRole("button", { name: "Save" }).click();
+    await expect(second).toHaveAttribute("data-due-status", "none");
+    await expect(page.getByText("All changes saved")).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId(`card-${secondId}`)).toHaveAttribute(
+      "data-due-status",
+      "none"
+    );
+  });
+});

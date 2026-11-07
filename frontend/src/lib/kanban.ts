@@ -2,6 +2,7 @@ export type Card = {
   id: string;
   title: string;
   details: string;
+  dueDate?: string | null;
 };
 
 export type Column = {
@@ -104,6 +105,50 @@ export const moveCard = (
     return column;
   });
 };
+
+export type DueStatus = "none" | "soon" | "overdue";
+
+const REVIEW_COLUMN_ID = "col-review";
+const DONE_COLUMN_ID = "col-done";
+const DUE_SOON_DAYS = 2;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const parseDate = (value: string) => {
+  const [year, month, day] = value.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+};
+
+export const toLocalDateString = (date: Date) =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+
+export const getDueStatus = (
+  dueDate: string | null | undefined,
+  columnId: string,
+  today: string
+): DueStatus => {
+  if (!dueDate || columnId === DONE_COLUMN_ID) {
+    return "none";
+  }
+  const daysLeft = (parseDate(dueDate) - parseDate(today)) / DAY_MS;
+  if (daysLeft < 0) {
+    return "overdue";
+  }
+  if (daysLeft <= DUE_SOON_DAYS && columnId !== REVIEW_COLUMN_ID) {
+    return "soon";
+  }
+  return "none";
+};
+
+export const formatDueDate = (dueDate: string) =>
+  new Date(parseDate(dueDate)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
 
 export const createId = (prefix: string) => {
   const randomPart = Math.random().toString(36).slice(2, 8);

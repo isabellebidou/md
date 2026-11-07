@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from "react";
 
-const initialFormState = { title: "", details: "" };
+const initialFormState = { title: "", details: "", dueDate: "" };
 
 type NewCardFormProps = {
-  onAdd: (title: string, details: string) => void;
+  onAdd: (title: string, details: string, dueDate: string | null) => void;
 };
 
 export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
@@ -15,7 +15,11 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
     if (!formState.title.trim()) {
       return;
     }
-    onAdd(formState.title.trim(), formState.details.trim());
+    onAdd(
+      formState.title.trim(),
+      formState.details.trim(),
+      formState.dueDate || null
+    );
     setFormState(initialFormState);
     setIsOpen(false);
   };
@@ -42,6 +46,17 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
             rows={3}
             className="w-full resize-none rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--gray-text)] outline-none transition focus:border-[var(--primary-blue)]"
           />
+          <label className="block text-xs font-semibold text-[var(--gray-text)]">
+            Due date (optional)
+            <input
+              type="date"
+              value={formState.dueDate}
+              onChange={(event) =>
+                setFormState((prev) => ({ ...prev, dueDate: event.target.value }))
+              }
+              className="mt-1 w-full rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
+            />
+          </label>
           <div className="flex items-center gap-2">
             <button
               type="submit"

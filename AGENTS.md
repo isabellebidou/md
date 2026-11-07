@@ -7,7 +7,8 @@ This project is building a Project Management App. Key features:
 - When signed in, the user sees a Kanban board representing their project
 - The Kanban board has fixed columns that can be renamed
 - The cards on the Kanban board can be moved with drag and drop, and edited
-- There is an AI chat feature in a sidebar; the AI is able to create / edit / move one or more cards
+- A card can optionally have a due date, set when creating or editing it. A dated card turns amber ("Due soon") from two days before its due date if it is not in Review or Done, and red ("Overdue") after its due date if it is not in Done. Undated cards never change colour
+- There is an AI chat feature in a sidebar; the AI is able to create / edit / move one or more cards, including setting or clearing due dates
 
 ## Limitations
 

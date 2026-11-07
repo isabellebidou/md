@@ -163,6 +163,40 @@ For tests, prioritize correctness, user-visible acceptance criteria, and securit
 
 **Success criteria:** A signed-in user can chat in the sidebar; AI-created, edited, or moved cards appear in the UI and remain persisted after reload.
 
+## Part 11: Card colour
+
+- [x] User reviews and approves this part before implementation begins.
+- [x] Add an optional card `dueDate` (`"YYYY-MM-DD"` or `null`) to the board JSON: `BoardCard.due_date: date | None` with alias `dueDate`, so impossible or malformed dates are rejected with 422.
+- [x] Persist the date in a nullable `cards.due_date TEXT` column; `initialize_database` adds the column to existing databases with `ALTER TABLE` when it is missing, keeping existing cards undated. `get_board` and `save_board` read and write it.
+- [x] Update `docs/kanban.schema.json` and `docs/DATABASE.md` for the new field.
+- [x] Add a native `<input type="date">` labelled "Due date (optional)" to the new-card form and the card edit form; clearing the input removes the date.
+- [x] Add a pure `getDueStatus(dueDate, columnId, today)` to `src/lib/kanban.ts` returning `"none" | "soon" | "overdue"`, comparing local calendar dates only:
+  - no date, or the card is in Done: `none`;
+  - after the due date: `overdue` (red), including in Review;
+  - up to two days before, or on, the due date, and the card is not in Review: `soon` (amber);
+  - otherwise `none`.
+  Review and Done are identified by column ID (`col-review`, `col-done`), not by renamable title.
+- [x] Show dated cards with a label ("Due 12 Nov"), plus "Due soon" or "Overdue" text so status is not conveyed by colour alone. Amber is a dedicated shade distinct from the accent yellow `#ecad0a` (which already marks column bars and the drop-target ring): an amber tint (`#fef3c7`) with an amber-600 (`#d97706`) left border and amber-800 (`#92400e`) label text. Red uses a red tint (`#fef2f2`) with a red-600 (`#dc2626`) left border and red-700 (`#b91c1c`) label text. Colours are CSS variables in `globals.css`. Apply the same styling to the drag preview.
+- [x] Keep colours current without a reload: a `useToday()` hook holds today's date as state, schedules one timeout for the next local midnight, and re-checks the date on `visibilitychange` so a laptop waking after midnight updates immediately.
+- [x] Derive status at render time from the card's date and column, so any change (manual edit, card move, or an AI `board_update` that postpones or clears the date) recolours the card immediately.
+- [x] Let the AI set and clear due dates: add an optional `due_date` (`"YYYY-MM-DD"` or `null` to clear) to `create_card` and `edit_card` actions, describe it in the system instructions, and include today's weekday and date plus a 14-day calendar (weekday and ISO date) in the user message, so relative dates such as "Friday" are looked up rather than calculated by the model.
+
+**Tests**
+- [x] Backend: board save and reload with a date, with `null`, and with the field omitted; 422 for impossible (`2026-02-30`) and malformed (`tomorrow`) dates.
+- [x] Backend: an old-schema database without `due_date` is migrated by `initialize_database` and keeps its cards.
+- [x] Backend: AI `create_card` and `edit_card` set a due date, `due_date: null` clears it, an invalid AI date returns 502, and today's date appears in the prompt.
+- [x] Frontend unit: table tests for `getDueStatus` covering every column group (active, Review, Done) against no date, three days before, two days before, one day before, the due date, and after, including month and year boundaries.
+- [x] Frontend unit, with a fixed clock (`vi.setSystemTime`): creating a card with a date sends `dueDate` in the save; editing adds, changes, and clears the date; cards show the correct label and style.
+- [x] Frontend unit: advancing past midnight turns an amber card red without a reload; a `visibilitychange` after a clock jump updates the colour; postponing an overdue card through the editor clears its colour; an AI `board_update` that postpones the date clears the colour.
+- [x] End-to-end: create a card with a date through the picker and confirm it persists after reload; a card due yesterday in Backlog shows "Overdue" and loses its colour after dragging to Done; a card due in two days shows "Due soon"; editing an overdue card to a later date removes the colour. Tests restore the board afterwards.
+- [x] Run the full backend, frontend unit, lint, build, and Playwright suites and rebuild the Docker image.
+
+**Validation:** 39 backend tests, 51 frontend unit tests, 13 Playwright tests, lint, static production build, and Docker image build passed. The live model was verified against a temporary database: it created a card due "next Friday" with the correct date, postponed it by a week, and cleared it. After a live report that "Friday" resolved to a Tuesday, the prompt gained a 14-day calendar; repeated live runs then resolved "Friday", "Monday", "tomorrow", and "Wednesday next week" correctly. The overdue end-to-end test uses its own temporary cards so an interrupted run cannot alter existing cards.
+
+**Approval:** The user approved this part with a two-day amber window, a dedicated amber shade, and the "Due soon" label.
+
+**Success criteria:** A user can optionally set, change, or clear a card's due date manually or through the AI chat; the date persists across reloads and restarts, including for databases created before this part; cards turn amber and red according to the rules above, update when the date, column, or current day changes without a reload, and undated cards never change colour.
+
 ## Accepted MVP limitations
 
 Recorded from the 2026-11-06 code review; revisit before multi-user work.
