@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthenticatedApp } from "@/components/AuthenticatedApp";
-import { initialData } from "@/lib/kanban";
+import { boardFixture } from "@/test/boardFixture";
 
 const response = (status: number, body?: unknown) => ({
   ok: status >= 200 && status < 300,
@@ -53,7 +53,7 @@ describe("AuthenticatedApp", () => {
     fetchMock
       .mockResolvedValueOnce(response(401))
       .mockResolvedValueOnce(response(200))
-      .mockResolvedValueOnce(response(200, initialData))
+      .mockResolvedValueOnce(response(200, boardFixture))
       .mockResolvedValueOnce(response(204));
 
     render(<AuthenticatedApp />);
@@ -72,5 +72,21 @@ describe("AuthenticatedApp", () => {
       "/api/auth/logout",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("returns to sign-in when the session expires during board use", async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(200, { username: "user" }))
+      .mockResolvedValueOnce(response(200, boardFixture))
+      .mockResolvedValueOnce(response(401));
+    render(<AuthenticatedApp />);
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Delete Align roadmap themes" })
+    );
+
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("Your session has expired.");
   });
 });

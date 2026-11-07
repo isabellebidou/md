@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
@@ -13,6 +14,8 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import clsx from "clsx";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AIChatSidebar } from "@/components/AIChatSidebar";
@@ -21,22 +24,30 @@ import { createId, moveCard, type BoardData } from "@/lib/kanban";
 type KanbanBoardProps = {
   initialBoard: BoardData;
   onLogout?: () => void;
+  onSessionExpired?: () => void;
 };
 
-export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
+export const KanbanBoard = ({
+  initialBoard,
+  onLogout,
+  onSessionExpired = () => {},
+}: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const [saveError, setSaveError] = useState("");
   const [retryCount, setRetryCount] = useState(0);
+  const [isAIPending, setIsAIPending] = useState(false);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const boardVersion = useRef(0);
   const persistedSnapshot = useRef(JSON.stringify(initialBoard));
+  const handleSaveUnauthorized = useEffectEvent(() => onSessionExpired());
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
-    })
+    }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
   const collisionDetection: CollisionDetection = (args) => {
     const pointerCollisions = pointerWithin(args);
@@ -45,9 +56,10 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
       : closestCorners(args);
   };
 
-  const cardsById = useMemo(() => board.cards, [board.cards]);
-
   const updateBoard = (nextBoard: BoardData) => {
+    if (isAIPending) {
+      return;
+    }
     boardVersion.current += 1;
     setBoard(nextBoard);
     setSaveError("");
@@ -76,6 +88,10 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
             credentials: "same-origin",
             body: snapshot,
           });
+          if (response.status === 401) {
+            handleSaveUnauthorized();
+            return;
+          }
           if (!response.ok) {
             throw new Error(`Board save failed (${response.status}).`);
           }
@@ -129,7 +145,7 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
       ...board,
       cards: {
         ...board.cards,
-        [id]: { id, title, details: details || "No details yet." },
+        [id]: { id, title, details },
       },
       columns: board.columns.map((column) =>
         column.id === columnId
@@ -166,12 +182,7 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
     });
   };
 
-  const refreshBoard = async () => {
-    const response = await fetch("/api/board", { credentials: "same-origin" });
-    if (!response.ok) {
-      throw new Error(`Board refresh failed (${response.status}).`);
-    }
-    const savedBoard = (await response.json()) as BoardData;
+  const applySavedBoard = (savedBoard: BoardData) => {
     boardVersion.current += 1;
     persistedSnapshot.current = JSON.stringify(savedBoard);
     setBoard(savedBoard);
@@ -180,7 +191,7 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
     setRetryCount(0);
   };
 
-  const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
     <div className="relative overflow-hidden">
@@ -250,6 +261,11 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
                 Retry save
               </button>
             )}
+            {isAIPending && (
+              <p className="text-[var(--gray-text)]">
+                The board is read-only while the assistant is working.
+              </p>
+            )}
           </div>
         </header>
 
@@ -260,7 +276,15 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
           onDragEnd={handleDragEnd}
         >
           <div className="grid min-w-0 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="min-w-0 overflow-x-auto pb-2">
+            <div
+              className={clsx(
+                "min-w-0 overflow-x-auto pb-2",
+                isAIPending && "opacity-60"
+              )}
+              inert={isAIPending}
+              aria-busy={isAIPending}
+              data-testid="board-columns"
+            >
               <section className="grid min-w-[1050px] grid-cols-5 gap-6">
                 {board.columns.map((column) => (
                   <KanbanColumn
@@ -277,7 +301,9 @@ export const KanbanBoard = ({ initialBoard, onLogout }: KanbanBoardProps) => {
             </div>
             <AIChatSidebar
               canSend={saveStatus === "saved"}
-              onBoardUpdated={refreshBoard}
+              onBoardUpdated={applySavedBoard}
+              onPendingChange={setIsAIPending}
+              onSessionExpired={onSessionExpired}
             />
           </div>
           <DragOverlay>

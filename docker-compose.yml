@@ -2,12 +2,12 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       SESSION_SECRET: ${SESSION_SECRET:-}
       DATABASE_PATH: /data/kanban.sqlite3
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
     volumes:
       - kanban-data:/data
     restart: unless-stopped

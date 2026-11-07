@@ -76,6 +76,13 @@ export const AuthenticatedApp = () => {
     }
   };
 
+  const handleSessionExpired = () => {
+    setBoard(null);
+    setPassword("");
+    setError("Your session has expired. Please sign in again.");
+    setAuthState("signed-out");
+  };
+
   const handleLogout = async () => {
     setError("");
     try {
@@ -129,7 +136,11 @@ export const AuthenticatedApp = () => {
             {error}
           </p>
         )}
-        {board && <KanbanBoard initialBoard={board} onLogout={handleLogout} />}
+        {board && <KanbanBoard
+            initialBoard={board}
+            onLogout={handleLogout}
+            onSessionExpired={handleSessionExpired}
+          />}
       </>
     );
   }

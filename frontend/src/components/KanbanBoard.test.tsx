@@ -1,12 +1,13 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, vi } from "vitest";
 import { KanbanBoard } from "@/components/KanbanBoard";
-import { initialData } from "@/lib/kanban";
+import { KanbanCard } from "@/components/KanbanCard";
+import { boardFixture } from "@/test/boardFixture";
 
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 const renderBoard = () =>
-  render(<KanbanBoard initialBoard={structuredClone(initialData)} />);
+  render(<KanbanBoard initialBoard={structuredClone(boardFixture)} />);
 
 const fetchMock = vi.fn();
 
@@ -145,19 +146,14 @@ describe("KanbanBoard", () => {
     );
   });
 
-  it("refreshes the saved board when the AI returns a board update", async () => {
-    const updatedBoard = structuredClone(initialData);
+  it("applies the saved board when the AI returns a board update", async () => {
+    const updatedBoard = structuredClone(boardFixture);
     updatedBoard.cards["card-1"].title = "AI-updated roadmap";
     fetchMock
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({ reply: "I updated the card.", board_update: updatedBoard }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => updatedBoard,
       });
     renderBoard();
     const user = userEvent.setup();
@@ -170,9 +166,103 @@ describe("KanbanBoard", () => {
 
     expect(await screen.findByText("AI-updated roadmap")).toBeVisible();
     expect(await screen.findByText("I updated the card.")).toBeVisible();
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/board",
-      expect.objectContaining({ credentials: "same-origin" })
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("All changes saved")).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a readable error when the AI error body is not JSON", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new SyntaxError("Unexpected token");
+      },
+    });
+    renderBoard();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Message the AI assistant"), "Hi");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("AI request failed (500).");
+  });
+
+  it("reports an expired session from the chat API", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
+    const onSessionExpired = vi.fn();
+    render(
+      <KanbanBoard
+        initialBoard={structuredClone(boardFixture)}
+        onSessionExpired={onSessionExpired}
+      />
+    );
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Message the AI assistant"), "Hi");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSessionExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an expired session from a board save", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
+    const onSessionExpired = vi.fn();
+    render(
+      <KanbanBoard
+        initialBoard={structuredClone(boardFixture)}
+        onSessionExpired={onSessionExpired}
+      />
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Delete Align roadmap themes" }));
+
+    await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("stores empty details for a new card", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+    const column = getFirstColumn();
+    await user.click(within(column).getByRole("button", { name: /add a card/i }));
+    await user.type(within(column).getByPlaceholderText(/card title/i), "No details");
+    await user.click(within(column).getByRole("button", { name: /add card/i }));
+
+    expect(await screen.findByText("All changes saved")).toBeVisible();
+    const saved = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const card = Object.values(saved.cards).find(
+      (item) => (item as { title: string }).title === "No details"
+    );
+    expect(card).toMatchObject({ details: "" });
+  });
+
+  it("picks up a card with the keyboard", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+
+    screen.getByTestId("card-card-1").focus();
+    await user.keyboard("[Space]");
+
+    expect(
+      await screen.findByText(/^(Picked up|Draggable) (draggable )?item card-1/)
+    ).toBeInTheDocument();
+    await user.keyboard("[Escape]");
+    expect(await screen.findByText(/Dragging was cancelled/)).toBeInTheDocument();
+  });
+
+  it("does not start a keyboard drag from the Edit button", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+    const button = screen.getByRole("button", { name: "Edit Align roadmap themes" });
+
+    button.focus();
+    await user.keyboard("[Enter]");
+
+    expect(screen.getByRole("textbox", { name: "Card title" })).toHaveValue(
+      "Align roadmap themes"
     );
   });
 
@@ -194,5 +284,91 @@ describe("KanbanBoard", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "AI returned an invalid board action."
     );
+  });
+
+  it("does not save an empty column title and restores the saved title", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+    const input = within(getFirstColumn()).getByLabelText("Column title");
+    const original = (input as HTMLInputElement).value;
+
+    await user.clear(input);
+    await user.tab();
+
+    expect(input).toHaveValue(original);
+    expect(screen.getByText("All changes saved")).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("saves a column rename once when the title is committed", async () => {
+    renderBoard();
+    const user = userEvent.setup();
+    const input = within(getFirstColumn()).getByLabelText("Column title");
+
+    await user.clear(input);
+    await user.type(input, "Ideas{Enter}");
+
+    expect(await screen.findByText("All changes saved")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/board",
+      expect.objectContaining({ body: expect.stringContaining('"title":"Ideas"') })
+    );
+  });
+
+  it("blocks board edits while an AI request is pending", async () => {
+    let resolveChat: (value: unknown) => void = () => {};
+    fetchMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveChat = resolve;
+      })
+    );
+    renderBoard();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Message the AI assistant"), "Summarize");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(
+      screen.getByText("The board is read-only while the assistant is working.")
+    ).toBeVisible();
+    expect(screen.getByTestId("board-columns")).toHaveAttribute("inert");
+    await user.click(
+      within(getFirstColumn()).getByRole("button", { name: /delete align roadmap themes/i })
+    );
+    expect(screen.getByText("Align roadmap themes")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveChat({
+        ok: true,
+        status: 200,
+        json: async () => ({ reply: "Done.", board_update: null }),
+      });
+    });
+    expect(await screen.findByText("Done.")).toBeVisible();
+    expect(screen.getByTestId("board-columns")).not.toHaveAttribute("inert");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("KanbanCard", () => {
+  it("shows the current card data when editing after a prop change", async () => {
+    const card = { id: "card-x", title: "Old title", details: "Old details" };
+    const { rerender } = render(
+      <KanbanCard card={card} onDelete={vi.fn()} onEdit={vi.fn()} />
+    );
+    rerender(
+      <KanbanCard
+        card={{ ...card, title: "AI title", details: "AI details" }}
+        onDelete={vi.fn()}
+        onEdit={vi.fn()}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit AI title" }));
+
+    expect(screen.getByRole("textbox", { name: "Card title" })).toHaveValue("AI title");
+    expect(screen.getByRole("textbox", { name: "Card details" })).toHaveValue("AI details");
   });
 });

@@ -11,9 +11,11 @@ export const KanbanCardPreview = ({ card }: KanbanCardPreviewProps) => (
         <h4 className="font-display text-base font-semibold text-[var(--navy-dark)]">
           {card.title}
         </h4>
-        <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
-          {card.details}
-        </p>
+        {card.details && (
+          <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
+            {card.details}
+          </p>
+        )}
       </div>
     </div>
   </article>

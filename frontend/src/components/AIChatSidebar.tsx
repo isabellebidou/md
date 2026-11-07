@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import type { BoardData } from "@/lib/kanban";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -9,17 +10,21 @@ type ChatMessage = {
 
 type AIChatResponse = {
   reply: string;
-  board_update: Record<string, unknown> | null;
+  board_update: BoardData | null;
 };
 
 type AIChatSidebarProps = {
   canSend: boolean;
-  onBoardUpdated: () => Promise<void>;
+  onBoardUpdated: (board: BoardData) => void;
+  onPendingChange: (isPending: boolean) => void;
+  onSessionExpired: () => void;
 };
 
 export const AIChatSidebar = ({
   canSend,
   onBoardUpdated,
+  onPendingChange,
+  onSessionExpired,
 }: AIChatSidebarProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState("");
@@ -36,6 +41,7 @@ export const AIChatSidebar = ({
     setError("");
     setQuestion("");
     setIsPending(true);
+    onPendingChange(true);
     setMessages((current) => [
       ...current,
       { role: "user", content: submittedQuestion },
@@ -51,8 +57,14 @@ export const AIChatSidebar = ({
           conversation: messages,
         }),
       });
+      if (response.status === 401) {
+        onSessionExpired();
+        return;
+      }
       if (!response.ok) {
-        const body = (await response.json()) as { detail?: string };
+        const body = (await response.json().catch(() => ({}))) as {
+          detail?: string;
+        };
         throw new Error(
           body.detail ?? `AI request failed (${response.status}).`
         );
@@ -64,7 +76,7 @@ export const AIChatSidebar = ({
       }
 
       if (result.board_update) {
-        await onBoardUpdated();
+        onBoardUpdated(result.board_update);
       }
       setMessages((current) => [
         ...current,
@@ -80,6 +92,7 @@ export const AIChatSidebar = ({
       );
     } finally {
       setIsPending(false);
+      onPendingChange(false);
     }
   };
 

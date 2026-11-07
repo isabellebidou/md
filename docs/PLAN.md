@@ -162,3 +162,12 @@ For tests, prioritize correctness, user-visible acceptance criteria, and securit
 **Validation:** Frontend lint, 15 frontend unit tests, 10 Playwright tests, 22 backend tests, static production build, and Docker Compose production image build all passed. The live model was also verified creating a card, editing a card, and moving a card in one request using a temporary database. Drag-and-drop coverage moves a card from In Progress to Discovery and then Backlog.
 
 **Success criteria:** A signed-in user can chat in the sidebar; AI-created, edited, or moved cards appear in the UI and remain persisted after reload.
+
+## Accepted MVP limitations
+
+Recorded from the 2026-11-06 code review; revisit before multi-user work.
+- Session tokens are stateless HMACs of the username: they never expire and logout cannot revoke them.
+- `get_session_username` only accepts the hardcoded `user`.
+- The session cookie has no `secure` flag, which is acceptable for plain-HTTP localhost.
+- Board saves replace the whole board (last write wins), so concurrent tabs overwrite each other.
+- The Playwright suite runs against the real `kanban-data` volume; tests restore their changes in `finally` blocks, but an aborted run can leave stray data.

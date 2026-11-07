@@ -7,5 +7,5 @@
 **/node_modules
 frontend/.next
 frontend/out
-backend/*.db
-backend/*.sqlite*
+**/*.db
+**/*.sqlite*

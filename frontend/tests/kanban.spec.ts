@@ -431,3 +431,53 @@ test("AI chat creates, edits, and moves cards in one request", async ({ page }) 
     }, originalBoard);
   }
 });
+
+test("moves a card with the keyboard", async ({ page }) => {
+  await signIn(page);
+  const originalBoard = await page.evaluate(async () => {
+    const response = await fetch("/api/board");
+    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
+    return response.json();
+  });
+  const sourceIndex = originalBoard.columns.findIndex(
+    (column: { cardIds: string[] }, index: number) =>
+      index < 4 && column.cardIds.length > 0
+  );
+  const cardId = originalBoard.columns[sourceIndex].cardIds[0];
+  const sourceColumn = page.getByTestId(
+    `column-${originalBoard.columns[sourceIndex].id}`
+  );
+
+  try {
+    const announcement = page.locator('[id^="DndLiveRegion"]');
+    await page.getByTestId(`card-${cardId}`).focus();
+    await page.keyboard.press("Space");
+    await expect(announcement).toHaveText(
+      `Draggable item ${cardId} was moved over droppable area ${cardId}.`
+    );
+    // dnd-kit attaches its keydown listener in a setTimeout after pickup.
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    await page.keyboard.press("ArrowRight");
+    await expect(announcement).not.toHaveText(new RegExp(`area ${cardId}\\.$`));
+    await page.keyboard.press("Space");
+    await expect(sourceColumn.getByTestId(`card-${cardId}`)).toHaveCount(0);
+    await expect(page.getByText("All changes saved")).toBeVisible();
+    const savedBoard = await page.evaluate(async () => {
+      const response = await fetch("/api/board");
+      return response.json();
+    });
+    const savedIndex = savedBoard.columns.findIndex(
+      (column: { cardIds: string[] }) => column.cardIds.includes(cardId)
+    );
+    expect(savedIndex).toBeGreaterThan(sourceIndex);
+  } finally {
+    await page.evaluate(async (board) => {
+      const response = await fetch("/api/board", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(board),
+      });
+      if (!response.ok) throw new Error("Unable to restore board after test.");
+    }, originalBoard);
+  }
+});
