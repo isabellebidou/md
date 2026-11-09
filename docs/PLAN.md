@@ -197,6 +197,36 @@ For tests, prioritize correctness, user-visible acceptance criteria, and securit
 
 **Success criteria:** A user can optionally set, change, or clear a card's due date manually or through the AI chat; the date persists across reloads and restarts, including for databases created before this part; cards turn amber and red according to the rules above, update when the date, column, or current day changes without a reload, and undated cards never change colour.
 
+## Part 12: User registration and password hashing
+
+- [ ] User reviews and approves this part before implementation begins.
+- [ ] Add `argon2-cffi` to the backend and hash passwords with its `PasswordHasher` (Argon2id, random per-password salt, parameters encoded in the hash string). Plaintext passwords are never stored or logged.
+- [ ] Add a nullable `users.password_hash TEXT` column; `initialize_database` adds it with `ALTER TABLE` to existing databases. The seeded demo account `user` gets the hash of `password` when its hash is `NULL`, so existing data and the demo login keep working.
+- [ ] Move board creation into a `create_user(username, password_hash)` database function that inserts the user and their board with the five fixed columns in one transaction. New users get an empty board; only the seeded demo user gets the sample cards. A duplicate username raises an error that the API maps to 409.
+- [ ] Add `POST /api/auth/register` taking `{username, password}`:
+  - usernames are lowercased, 3-32 characters, and may contain only `a-z`, `0-9`, `_`, and `-` (no `.`, which separates the session token from its signature);
+  - passwords are 8-128 characters (the upper bound limits hashing cost);
+  - invalid input returns 422, a taken username returns 409, and success returns 201 `{username}` and sets the session cookie, so the user is signed in.
+- [ ] Change `POST /api/auth/login` to look the user up and verify the password against the stored hash. Unknown usernames are verified against a fixed dummy hash, so response times do not reveal which usernames exist. Both cases return the same 401 "Invalid username or password". Usernames are lowercased before lookup.
+- [ ] Change `get_session_username` to accept any signed username that exists in the database, replacing the hardcoded `user` check. Boards, saves, and AI chat already use the session username, so each user only sees and changes their own board.
+- [ ] Frontend: add a "Create an account" link to the sign-in screen that switches to a register form (username, password, and confirm password with `autocomplete="new-password"`), plus a link back to sign in. The form checks locally that the passwords match. A 409 shows "That username is already taken." and a 422 shows the username and password rules. Success opens the new user's board.
+- [ ] Update `AGENTS.md` (business requirements and limitations), `docs/DATABASE.md`, `docs/kanban.schema.json` (the export never includes `password_hash`), `CLAUDE.md`, `backend/AGENTS.md`, and the accepted limitations below.
+
+**Out of scope:** password change or reset, account deletion, login rate limiting, and email verification.
+
+**Tests**
+- [ ] Backend: registration creates the user and an empty five-column board and signs them in; the stored hash starts with `$argon2id$`, verifies the password, and does not contain it.
+- [ ] Backend: a duplicate username (including different case) returns 409; a short, long, or invalid username and a short or long password return 422.
+- [ ] Backend: a registered user can log in; a wrong password and an unknown username both return the same 401; the demo `user` / `password` login still works.
+- [ ] Backend: a validly signed cookie for a username that does not exist returns 401. Two users' boards are isolated: saving one board does not change the other, and the AI chat edits only the caller's board.
+- [ ] Backend: a database created before this part gets the `password_hash` column and a demo user hash, and keeps its cards.
+- [ ] Frontend unit: switching between sign-in and register; a successful registration opens the board; mismatched passwords block submission; 409 and 422 errors are shown.
+- [ ] End-to-end: register a new unique user, see an empty board, add a card, log out, log back in, and find the card; the demo user's board does not contain it. The test uses a unique `e2e-<timestamp>` username. Its `finally` block deletes that user from the database inside the container (`docker compose exec app uv run --no-sync python -c ...`, with foreign keys on so the board, columns, and cards cascade), so no test user remains. Only a run killed before `finally` can leave one behind. This cleanup is test-only; the app gets no account-deletion route.
+- [ ] Add a small backend helper, `delete_user(username)` in `app/database.py`, used only by the e2e cleanup command and covered by a backend test that checks the user's board, columns, and cards are removed.
+- [ ] Run the full backend, frontend unit, lint, build, and Playwright suites and rebuild the Docker image.
+
+**Success criteria:** A visitor can register with a username and password and is signed in to their own empty board; they can log out and back in; passwords are stored only as Argon2id hashes; the demo `user` / `password` account and its existing board still work; users cannot see or change each other's boards.
+
 ## Accepted MVP limitations
 
 Recorded from the 2026-11-06 code review; revisit before multi-user work.

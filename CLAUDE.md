@@ -35,3 +35,5 @@ Frontend (run from `frontend/`):
 - AI chat (`POST /api/ai/chat`): the backend builds a prompt with the current board, the question, and the last 6 messages, and asks the model for JSON `{reply, actions}`, where actions are `create_card` / `edit_card` / `move_card` (`BoardAction`). The backend applies the actions itself (`apply_board_actions`), validates, saves, and returns `{reply, board_update}`; the model never returns a full board. Instructions go in a system message and the request uses JSON mode. The frontend `AIChatSidebar` applies `board_update` directly, and the board is read-only while a chat request is pending. Config errors map to 503, provider/invalid-output errors to 502.
 - AI config: `OPENAI_API_KEY` and `OPENAI_MODEL` from the root `.env` via docker-compose. The model defaults to `gpt-4o-mini` in `app/ai.py` (`get_model`). `.env` is excluded from the Docker build context. `SESSION_SECRET` keeps sessions valid across restarts; if it is unset, a random per-process key is used.
 - Backend tests mock the AI by monkeypatching `app.main.get_ai_response`; automated tests never need a real key.
+## Plan
+@docs/PLAN.md
