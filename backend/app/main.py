@@ -3,24 +3,18 @@ import hmac
 import json
 import os
 import secrets
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import date, timedelta
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.ai import AIConfigurationError, AIProviderError, get_ai_response, get_model
-from app.database import (
-    FixedColumnsError,
-    get_board,
-    get_database_path,
-    initialize_database,
-    save_board,
-)
+from app.database import FixedColumnsError, get_board, initialize_database, save_board
 
 static_dir = Path(__file__).parent / "static"
 session_secret = os.environ.get("SESSION_SECRET")
@@ -141,16 +135,19 @@ class AIBoardResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    initialize_database(get_database_path())
+    initialize_database()
     yield
 
 
 app = FastAPI(title="Project Management API", lifespan=lifespan)
 
 
+def sign_username(username: str) -> str:
+    return hmac.new(session_key, username.encode(), hashlib.sha256).hexdigest()
+
+
 def create_session_token(username: str) -> str:
-    signature = hmac.new(session_key, username.encode(), hashlib.sha256).hexdigest()
-    return f"{username}.{signature}"
+    return f"{username}.{sign_username(username)}"
 
 
 def get_session_username(request: Request) -> str:
@@ -158,11 +155,7 @@ def get_session_username(request: Request) -> str:
     username, separator, signature = token.partition(".")
     if not separator or username != "user":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-
-    expected_signature = hmac.new(
-        session_key, username.encode(), hashlib.sha256
-    ).hexdigest()
-    if not hmac.compare_digest(signature.encode(), expected_signature.encode()):
+    if not hmac.compare_digest(signature.encode(), sign_username(username).encode()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     return username
 
@@ -226,18 +219,19 @@ def parse_board_chat_response(raw_response: str) -> AIModelResponse:
         raise ValueError(f"AI response has an invalid structure: {error}") from error
 
 
+def due_date_string(value: date | None) -> str | None:
+    return value.isoformat() if value else None
+
+
 def apply_board_actions(
     board: dict[str, Any], actions: list[BoardAction]
 ) -> BoardData:
     updated_board = deepcopy(board)
 
     def find_column(locator: str) -> dict[str, Any]:
-        exact_id = next(
-            (column for column in updated_board["columns"] if column["id"] == locator),
-            None,
-        )
-        if exact_id is not None:
-            return exact_id
+        for column in updated_board["columns"]:
+            if column["id"] == locator:
+                return column
         matching_columns = [
             column
             for column in updated_board["columns"]
@@ -255,7 +249,7 @@ def apply_board_actions(
                 "id": card_id,
                 "title": action.title.strip() if action.title else "",
                 "details": action.details or "",
-                "dueDate": action.due_date.isoformat() if action.due_date else None,
+                "dueDate": due_date_string(action.due_date),
             }
             destination["cardIds"].append(card_id)
         elif action.action == "edit_card":
@@ -267,9 +261,7 @@ def apply_board_actions(
             if action.details is not None:
                 card["details"] = action.details
             if "due_date" in action.model_fields_set:
-                card["dueDate"] = (
-                    action.due_date.isoformat() if action.due_date else None
-                )
+                card["dueDate"] = due_date_string(action.due_date)
         else:
             card_id = action.card_id or ""
             if card_id not in updated_board["cards"]:
@@ -282,6 +274,16 @@ def apply_board_actions(
             destination["cardIds"].append(card_id)
 
     return BoardData.model_validate(updated_board)
+
+
+def get_board_or_404(username: str) -> dict[str, Any]:
+    board = get_board(username)
+    if board is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Board not found",
+        )
+    return board
 
 
 def save_board_or_raise(username: str, board: BoardData) -> None:
@@ -329,13 +331,7 @@ def ai_connectivity_check(request: Request) -> dict[str, str]:
 def run_board_chat(
     username: str, question: str, conversation: list[AIChatMessage]
 ) -> AIBoardResponse:
-    board = get_board(username)
-    if board is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Board not found",
-        )
-
+    board = get_board_or_404(username)
     raw_response = call_ai(
         build_board_chat_messages(question, board, conversation, date.today()),
         json_mode=True,
@@ -404,14 +400,7 @@ def logout() -> Response:
 
 @app.get("/api/board", response_model=BoardData)
 def read_board(request: Request) -> BoardData:
-    username = get_session_username(request)
-    board = get_board(username)
-    if board is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Board not found",
-        )
-    return BoardData.model_validate(board)
+    return BoardData.model_validate(get_board_or_404(get_session_username(request)))
 
 
 @app.put("/api/board", response_model=BoardData)

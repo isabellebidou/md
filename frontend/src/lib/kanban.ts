@@ -16,36 +16,26 @@ export type BoardData = {
   cards: Record<string, Card>;
 };
 
-const isColumnId = (columns: Column[], id: string) =>
-  columns.some((column) => column.id === id);
-
-const findColumnId = (columns: Column[], id: string) => {
-  if (isColumnId(columns, id)) {
-    return id;
-  }
-  return columns.find((column) => column.cardIds.includes(id))?.id;
-};
+// Resolves a drag ID to its column: either the column itself or the column holding that card.
+const findColumn = (columns: Column[], id: string) =>
+  columns.find((column) => column.id === id) ??
+  columns.find((column) => column.cardIds.includes(id));
 
 export const moveCard = (
   columns: Column[],
   activeId: string,
   overId: string
 ): Column[] => {
-  const activeColumnId = findColumnId(columns, activeId);
-  const overColumnId = findColumnId(columns, overId);
-
-  if (!activeColumnId || !overColumnId) {
-    return columns;
-  }
-
-  const activeColumn = columns.find((column) => column.id === activeColumnId);
-  const overColumn = columns.find((column) => column.id === overColumnId);
+  const activeColumn = findColumn(columns, activeId);
+  const overColumn = findColumn(columns, overId);
 
   if (!activeColumn || !overColumn) {
     return columns;
   }
 
-  const isOverColumn = isColumnId(columns, overId);
+  const activeColumnId = activeColumn.id;
+  const overColumnId = overColumn.id;
+  const isOverColumn = overColumnId === overId;
 
   if (activeColumnId === overColumnId) {
     if (isOverColumn) {

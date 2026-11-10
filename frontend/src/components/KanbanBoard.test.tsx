@@ -1,5 +1,5 @@
 import { act, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, vi } from "vitest";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { KanbanCard } from "@/components/KanbanCard";
@@ -8,6 +8,24 @@ import { boardFixture } from "@/test/boardFixture";
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 const renderBoard = () =>
   render(<KanbanBoard initialBoard={structuredClone(boardFixture)} />);
+
+const editCardTitle = async (user: UserEvent, title: string) => {
+  await user.click(screen.getByRole("button", { name: "Edit Align roadmap themes" }));
+  await user.clear(screen.getByRole("textbox", { name: "Card title" }));
+  await user.type(screen.getByRole("textbox", { name: "Card title" }), title);
+  await user.click(screen.getByRole("button", { name: "Save" }));
+};
+
+const sendChat = async (user: UserEvent, question: string) => {
+  await user.type(screen.getByLabelText("Message the AI assistant"), question);
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+};
+
+const chatReply = (reply: string, board_update: unknown = null) => ({
+  ok: true,
+  status: 200,
+  json: async () => ({ reply, board_update }),
+});
 
 const fetchMock = vi.fn();
 
@@ -64,10 +82,7 @@ describe("KanbanBoard", () => {
   it("edits a card", async () => {
     renderBoard();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Edit Align roadmap themes" }));
-    await user.clear(screen.getByRole("textbox", { name: "Card title" }));
-    await user.type(screen.getByRole("textbox", { name: "Card title" }), "Updated title");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await editCardTitle(user, "Updated title");
 
     expect(screen.getByText("Updated title")).toBeInTheDocument();
   });
@@ -75,10 +90,7 @@ describe("KanbanBoard", () => {
   it("saves updated board data to the backend", async () => {
     renderBoard();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Edit Align roadmap themes" }));
-    await user.clear(screen.getByRole("textbox", { name: "Card title" }));
-    await user.type(screen.getByRole("textbox", { name: "Card title" }), "Saved title");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await editCardTitle(user, "Saved title");
 
     expect(await screen.findByText("All changes saved")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -96,10 +108,7 @@ describe("KanbanBoard", () => {
       .mockResolvedValueOnce({ ok: true, status: 200 });
     renderBoard();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Edit Align roadmap themes" }));
-    await user.clear(screen.getByRole("textbox", { name: "Card title" }));
-    await user.type(screen.getByRole("textbox", { name: "Card title" }), "Unsaved title");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await editCardTitle(user, "Unsaved title");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Your changes could not be saved."
@@ -110,25 +119,15 @@ describe("KanbanBoard", () => {
 
   it("sends chat history and renders the assistant reply", async () => {
     fetchMock
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ reply: "Your board has eight cards.", board_update: null }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ reply: "There are five columns.", board_update: null }),
-      });
+      .mockResolvedValueOnce(chatReply("Your board has eight cards."))
+      .mockResolvedValueOnce(chatReply("There are five columns."));
     renderBoard();
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("Message the AI assistant"), "Summarize my board");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await sendChat(user, "Summarize my board");
     expect(await screen.findByText("Your board has eight cards.")).toBeVisible();
 
-    await user.type(screen.getByLabelText("Message the AI assistant"), "How many columns?");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await sendChat(user, "How many columns?");
 
     expect(await screen.findByText("There are five columns.")).toBeVisible();
     expect(fetchMock).toHaveBeenLastCalledWith(
@@ -149,20 +148,11 @@ describe("KanbanBoard", () => {
   it("applies the saved board when the AI returns a board update", async () => {
     const updatedBoard = structuredClone(boardFixture);
     updatedBoard.cards["card-1"].title = "AI-updated roadmap";
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ reply: "I updated the card.", board_update: updatedBoard }),
-      });
+    fetchMock.mockResolvedValueOnce(chatReply("I updated the card.", updatedBoard));
     renderBoard();
     const user = userEvent.setup();
 
-    await user.type(
-      screen.getByLabelText("Message the AI assistant"),
-      "Rename the roadmap card"
-    );
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await sendChat(user, "Rename the roadmap card");
 
     expect(await screen.findByText("AI-updated roadmap")).toBeVisible();
     expect(await screen.findByText("I updated the card.")).toBeVisible();
@@ -183,8 +173,7 @@ describe("KanbanBoard", () => {
     renderBoard();
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("Message the AI assistant"), "Hi");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await sendChat(user, "Hi");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("AI request failed (500).");
   });
@@ -200,8 +189,7 @@ describe("KanbanBoard", () => {
     );
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("Message the AI assistant"), "Hi");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await sendChat(user, "Hi");
 
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
   });
@@ -275,11 +263,7 @@ describe("KanbanBoard", () => {
     renderBoard();
     const user = userEvent.setup();
 
-    await user.type(
-      screen.getByLabelText("Message the AI assistant"),
-      "Summarize my board"
-    );
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await sendChat(user, "Summarize my board");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "AI returned an invalid board action."
@@ -327,8 +311,7 @@ describe("KanbanBoard", () => {
     renderBoard();
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("Message the AI assistant"), "Summarize");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await sendChat(user, "Summarize");
 
     expect(
       screen.getByText("The board is read-only while the assistant is working.")
@@ -340,11 +323,7 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("Align roadmap themes")).toBeInTheDocument();
 
     await act(async () => {
-      resolveChat({
-        ok: true,
-        status: 200,
-        json: async () => ({ reply: "Done.", board_update: null }),
-      });
+      resolveChat(chatReply("Done."));
     });
     expect(await screen.findByText("Done.")).toBeVisible();
     expect(screen.getByTestId("board-columns")).not.toHaveAttribute("inert");
@@ -498,17 +477,12 @@ describe("KanbanBoard due dates", () => {
 
   it("clears the colour when the assistant postpones the date", async () => {
     const postponed = boardWithDue("card-1", "2026-11-30");
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ reply: "Postponed.", board_update: postponed }),
-    });
+    fetchMock.mockResolvedValueOnce(chatReply("Postponed.", postponed));
     render(<KanbanBoard initialBoard={boardWithDue("card-1", "2026-11-01")} />);
     const user = userEvent.setup();
     expect(screen.getByTestId("card-card-1")).toHaveAttribute("data-due-status", "overdue");
 
-    await user.type(screen.getByLabelText("Message the AI assistant"), "Postpone");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await sendChat(user, "Postpone");
 
     expect(await screen.findByText("Postponed.")).toBeVisible();
     expect(screen.getByTestId("card-card-1")).toHaveAttribute("data-due-status", "none");

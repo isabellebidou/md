@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import clsx from "clsx";
 import type { BoardData } from "@/lib/kanban";
 
 type ChatMessage = {
@@ -123,11 +124,12 @@ export const AIChatSidebar = ({
         {messages.map((message, index) => (
           <div
             key={`${message.role}-${index}`}
-            className={`max-w-[90%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-5 ${
+            className={clsx(
+              "max-w-[90%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-5",
               message.role === "user"
                 ? "ml-auto bg-[var(--primary-blue)] text-white"
                 : "mr-auto bg-[var(--surface)] text-[var(--navy-dark)]"
-            }`}
+            )}
           >
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.15em] opacity-75">
               {message.role === "user" ? "You" : "Assistant"}

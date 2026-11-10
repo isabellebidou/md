@@ -7,6 +7,12 @@ export const dueStatusClasses: Record<DueStatus, string> = {
   overdue: "border-l-4 border-l-[var(--due-overdue)] bg-[var(--due-overdue-tint)]",
 };
 
+const labelClasses: Record<DueStatus, string> = {
+  none: "text-[var(--gray-text)]",
+  soon: "text-[var(--due-soon-text)]",
+  overdue: "text-[var(--due-overdue-text)]",
+};
+
 const statusText: Record<DueStatus, string> = {
   none: "",
   soon: " - Due soon",
@@ -22,9 +28,7 @@ export const DueDateLabel = ({ dueDate, status }: DueDateLabelProps) => (
   <p
     className={clsx(
       "mt-2 text-xs font-semibold uppercase tracking-wide",
-      status === "none" && "text-[var(--gray-text)]",
-      status === "soon" && "text-[var(--due-soon-text)]",
-      status === "overdue" && "text-[var(--due-overdue-text)]"
+      labelClasses[status]
     )}
   >
     Due {formatDueDate(dueDate)}

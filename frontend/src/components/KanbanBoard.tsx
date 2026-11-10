@@ -22,6 +22,20 @@ import { AIChatSidebar } from "@/components/AIChatSidebar";
 import { createId, getDueStatus, moveCard, type BoardData } from "@/lib/kanban";
 import { useToday } from "@/lib/useToday";
 
+type SaveStatus = "saved" | "pending" | "saving" | "error";
+
+const saveStatusText: Record<SaveStatus, string> = {
+  saved: "All changes saved",
+  pending: "Unsaved changes",
+  saving: "Saving changes...",
+  error: "Your changes could not be saved.",
+};
+
+const collisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  return pointerCollisions.length > 0 ? pointerCollisions : closestCorners(args);
+};
+
 type KanbanBoardProps = {
   initialBoard: BoardData;
   onLogout?: () => void;
@@ -33,10 +47,9 @@ export const KanbanBoard = ({
   onLogout,
   onSessionExpired = () => {},
 }: KanbanBoardProps) => {
-  const [board, setBoard] = useState<BoardData>(() => initialBoard);
+  const [board, setBoard] = useState(initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">("saved");
-  const [saveError, setSaveError] = useState("");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [retryCount, setRetryCount] = useState(0);
   const [isAIPending, setIsAIPending] = useState(false);
   const today = useToday();
@@ -51,12 +64,6 @@ export const KanbanBoard = ({
     }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
-  const collisionDetection: CollisionDetection = (args) => {
-    const pointerCollisions = pointerWithin(args);
-    return pointerCollisions.length > 0
-      ? pointerCollisions
-      : closestCorners(args);
-  };
 
   const updateBoard = (nextBoard: BoardData) => {
     if (isAIPending) {
@@ -64,7 +71,6 @@ export const KanbanBoard = ({
     }
     boardVersion.current += 1;
     setBoard(nextBoard);
-    setSaveError("");
     setSaveStatus("pending");
     setRetryCount(0);
   };
@@ -100,12 +106,10 @@ export const KanbanBoard = ({
           persistedSnapshot.current = snapshot;
           if (version === boardVersion.current) {
             setSaveStatus("saved");
-            setSaveError("");
           }
         } catch {
           if (version === boardVersion.current) {
             setSaveStatus("error");
-            setSaveError("Your changes could not be saved.");
           }
         }
       });
@@ -198,7 +202,6 @@ export const KanbanBoard = ({
     boardVersion.current += 1;
     persistedSnapshot.current = JSON.stringify(savedBoard);
     setBoard(savedBoard);
-    setSaveError("");
     setSaveStatus("saved");
     setRetryCount(0);
   };
@@ -258,14 +261,11 @@ export const KanbanBoard = ({
             ))}
           </div>
           <div className="flex items-center gap-3 text-sm">
-            <p role={saveStatus === "error" ? "alert" : "status"} className={saveStatus === "error" ? "text-red-700" : "text-[var(--gray-text)]"}>
-              {saveStatus === "error"
-                ? saveError
-                : saveStatus === "saving"
-                  ? "Saving changes..."
-                  : saveStatus === "pending"
-                    ? "Unsaved changes"
-                    : "All changes saved"}
+            <p
+              role={saveStatus === "error" ? "alert" : "status"}
+              className={saveStatus === "error" ? "text-red-700" : "text-[var(--gray-text)]"}
+            >
+              {saveStatusText[saveStatus]}
             </p>
             {saveStatus === "error" && (
               <button

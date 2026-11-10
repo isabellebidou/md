@@ -76,12 +76,15 @@ export const AuthenticatedApp = () => {
     }
   };
 
-  const handleSessionExpired = () => {
+  const showSignIn = (message = "") => {
     setBoard(null);
     setPassword("");
-    setError("Your session has expired. Please sign in again.");
+    setError(message);
     setAuthState("signed-out");
   };
+
+  const handleSessionExpired = () =>
+    showSignIn("Your session has expired. Please sign in again.");
 
   const handleLogout = async () => {
     setError("");
@@ -93,9 +96,7 @@ export const AuthenticatedApp = () => {
       if (!response.ok) {
         throw new Error(`Logout failed (${response.status}).`);
       }
-      setBoard(null);
-      setPassword("");
-      setAuthState("signed-out");
+      showSignIn();
     } catch {
       setError("Unable to log out. Please try again.");
     }
@@ -136,11 +137,13 @@ export const AuthenticatedApp = () => {
             {error}
           </p>
         )}
-        {board && <KanbanBoard
+        {board && (
+          <KanbanBoard
             initialBoard={board}
             onLogout={handleLogout}
             onSessionExpired={handleSessionExpired}
-          />}
+          />
+        )}
       </>
     );
   }

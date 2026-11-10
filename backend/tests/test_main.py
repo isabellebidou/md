@@ -1,10 +1,13 @@
 import json
 import sqlite3
+from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.ai import AIProviderError, get_ai_response, get_model
 from app.database import (
     DEFAULT_COLUMNS,
     database_connection,
@@ -12,8 +15,7 @@ from app.database import (
     initialize_database,
     save_board,
 )
-from app.ai import AIProviderError
-from app.main import app
+from app.main import app, build_board_chat_messages
 
 
 @pytest.fixture
@@ -35,6 +37,20 @@ def sign_in(client: TestClient) -> None:
     assert response.status_code == 200
 
 
+def fake_ai(monkeypatch: pytest.MonkeyPatch, response: str) -> dict:
+    """Make the mocked model return `response`; returns the captured request."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    captured: dict = {}
+
+    def fake_get_ai_response(messages, *, json_mode=False) -> str:
+        captured["messages"] = messages
+        captured["json_mode"] = json_mode
+        return response
+
+    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+    return captured
+
+
 def test_hello_route(client: TestClient) -> None:
     response = client.get("/api/hello")
 
@@ -54,19 +70,14 @@ def test_home_serves_static_html(client: TestClient) -> None:
 def test_ai_connectivity_check_returns_the_model_answer(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    def fake_get_ai_response(messages, *, json_mode=False) -> str:
-        assert messages == [{"role": "user", "content": "2+2"}]
-        assert json_mode is False
-        return "4"
-
-    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+    captured = fake_ai(monkeypatch, "4")
     sign_in(client)
     response = client.post("/api/ai/test")
 
     assert response.status_code == 200
     assert response.json() == {"answer": "4", "model": "gpt-4o-mini"}
+    assert captured["messages"] == [{"role": "user", "content": "2+2"}]
+    assert captured["json_mode"] is False
 
 
 def test_ai_connectivity_check_requires_an_api_key(
@@ -114,15 +125,7 @@ def test_ai_connectivity_check_requires_a_session(
 def test_ai_chat_includes_board_and_history_in_prompt(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    captured: dict = {}
-
-    def fake_get_ai_response(messages, *, json_mode=False) -> str:
-        captured["messages"] = messages
-        captured["json_mode"] = json_mode
-        return '{"reply": "I can help.", "actions": []}'
-
-    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+    captured = fake_ai(monkeypatch, '{"reply": "I can help.", "actions": []}')
     sign_in(client)
 
     response = client.post(
@@ -153,11 +156,10 @@ def test_ai_chat_includes_board_and_history_in_prompt(
 def test_ai_chat_creates_the_requested_card_in_backlog(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     sign_in(client)
-
-    def fake_get_ai_response(messages, *, json_mode=False) -> str:
-        return json.dumps(
+    fake_ai(
+        monkeypatch,
+        json.dumps(
             {
                 "reply": 'Created "blue ring" in Backlog.',
                 "actions": [
@@ -169,9 +171,8 @@ def test_ai_chat_creates_the_requested_card_in_backlog(
                     }
                 ],
             }
-        )
-
-    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+        ),
+    )
 
     response = client.post(
         "/api/ai/chat",
@@ -197,11 +198,10 @@ def test_ai_chat_creates_the_requested_card_in_backlog(
 def test_ai_chat_edits_and_moves_a_card(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     sign_in(client)
-
-    def fake_get_ai_response(messages, *, json_mode=False) -> str:
-        return json.dumps(
+    fake_ai(
+        monkeypatch,
+        json.dumps(
             {
                 "reply": "Updated and moved the roadmap card.",
                 "actions": [
@@ -218,9 +218,8 @@ def test_ai_chat_edits_and_moves_a_card(
                     },
                 ],
             }
-        )
-
-    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+        ),
+    )
 
     response = client.post(
         "/api/ai/chat",
@@ -245,13 +244,8 @@ def test_ai_chat_edits_and_moves_a_card(
 def test_ai_chat_rejects_malformed_model_output(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     sign_in(client)
-
-    def fake_get_ai_response(messages, *, json_mode=False) -> str:
-        return "not-json"
-
-    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+    fake_ai(monkeypatch, "not-json")
 
     response = client.post(
         "/api/ai/chat",
@@ -265,13 +259,11 @@ def test_ai_chat_rejects_malformed_model_output(
 def test_ai_chat_rejects_invalid_board_updates(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     sign_in(client)
-
-    def fake_get_ai_response(messages, *, json_mode=False) -> str:
-        return '{"reply": "bad action", "actions": [{"action": "move_card", "card_id": "missing-card", "column": "Backlog"}]}'
-
-    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
+    fake_ai(
+        monkeypatch,
+        '{"reply": "bad action", "actions": [{"action": "move_card", "card_id": "missing-card", "column": "Backlog"}]}',
+    )
 
     response = client.post(
         "/api/ai/chat",
@@ -346,7 +338,7 @@ def test_session_rejects_missing_or_invalid_cookie(client: TestClient) -> None:
 
 
 def test_logout_clears_session_cookie(client: TestClient) -> None:
-    client.post("/api/auth/login", json={"username": "user", "password": "password"})
+    sign_in(client)
 
     response = client.post("/api/auth/logout")
 
@@ -468,10 +460,6 @@ def test_board_storage_is_scoped_to_username(database_path: Path) -> None:
 def test_get_ai_response_sends_json_mode_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from types import SimpleNamespace
-
-    import app.ai
-
     captured: dict = {}
 
     class FakeOpenAI:
@@ -485,13 +473,13 @@ def test_get_ai_response_sends_json_mode_request(
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
-    monkeypatch.setattr(app.ai, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr("app.ai.OpenAI", FakeOpenAI)
     messages = [
         {"role": "system", "content": "Respond in JSON."},
         {"role": "user", "content": "Hi"},
     ]
 
-    result = app.ai.get_ai_response(messages, json_mode=True)
+    result = get_ai_response(messages, json_mode=True)
 
     assert result == '{"reply": "ok", "actions": []}'
     assert captured["model"] == "gpt-4o-mini"
@@ -502,11 +490,7 @@ def test_get_ai_response_sends_json_mode_request(
 def test_ai_chat_strips_reply_whitespace(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "app.main.get_ai_response",
-        lambda messages, *, json_mode=False: '{"reply": "  Hi.  ", "actions": []}',
-    )
+    fake_ai(monkeypatch, '{"reply": "  Hi.  ", "actions": []}')
     sign_in(client)
 
     response = client.post("/api/ai/chat", json={"question": "Hello"})
@@ -517,11 +501,7 @@ def test_ai_chat_strips_reply_whitespace(
 def test_ai_chat_rejects_blank_reply(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "app.main.get_ai_response",
-        lambda messages, *, json_mode=False: '{"reply": "   ", "actions": []}',
-    )
+    fake_ai(monkeypatch, '{"reply": "   ", "actions": []}')
     sign_in(client)
 
     response = client.post("/api/ai/chat", json={"question": "Hello"})
@@ -531,23 +511,10 @@ def test_ai_chat_rejects_blank_reply(
 
 
 def test_blank_openai_model_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.ai import get_model
-
     monkeypatch.setenv("OPENAI_MODEL", "")
     assert get_model() == "gpt-4o-mini"
     monkeypatch.setenv("OPENAI_MODEL", "gpt-other")
     assert get_model() == "gpt-other"
-
-
-def ai_returns(monkeypatch: pytest.MonkeyPatch, payload: dict, captured: dict | None = None) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    def fake_get_ai_response(messages, *, json_mode=False) -> str:
-        if captured is not None:
-            captured["messages"] = messages
-        return json.dumps(payload)
-
-    monkeypatch.setattr("app.main.get_ai_response", fake_get_ai_response)
 
 
 def test_board_due_dates_persist_and_can_be_cleared(client: TestClient) -> None:
@@ -620,13 +587,13 @@ def test_ai_chat_sets_and_clears_due_dates(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sign_in(client)
-    ai_returns(monkeypatch, {
+    fake_ai(monkeypatch, json.dumps({
         "reply": "Done.",
         "actions": [
             {"action": "create_card", "title": "Workout", "details": "", "due_date": "2026-11-20", "column": "Backlog"},
             {"action": "edit_card", "card_id": "card-2", "due_date": "2026-11-15"},
         ],
-    })
+    }))
     response = client.post("/api/ai/chat", json={"question": "Add dates"})
 
     assert response.status_code == 200
@@ -636,10 +603,10 @@ def test_ai_chat_sets_and_clears_due_dates(
     assert board["cards"]["card-2"]["dueDate"] == "2026-11-15"
     assert board["cards"]["card-2"]["title"] == "Gather customer signals"
 
-    ai_returns(monkeypatch, {
+    fake_ai(monkeypatch, json.dumps({
         "reply": "Cleared.",
         "actions": [{"action": "edit_card", "card_id": "card-2", "due_date": None}],
-    })
+    }))
     response = client.post("/api/ai/chat", json={"question": "Remove the date"})
 
     assert response.status_code == 200
@@ -654,10 +621,10 @@ def test_ai_chat_edit_without_due_date_keeps_it(
     board = client.get("/api/board").json()
     board["cards"]["card-1"]["dueDate"] = "2026-11-12"
     client.put("/api/board", json=board)
-    ai_returns(monkeypatch, {
+    fake_ai(monkeypatch, json.dumps({
         "reply": "Renamed.",
         "actions": [{"action": "edit_card", "card_id": "card-1", "title": "Renamed"}],
-    })
+    }))
 
     client.post("/api/ai/chat", json={"question": "Rename"})
 
@@ -680,7 +647,7 @@ def test_ai_chat_rejects_invalid_due_date_actions(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, action: dict
 ) -> None:
     sign_in(client)
-    ai_returns(monkeypatch, {"reply": "Ok.", "actions": [action]})
+    fake_ai(monkeypatch, json.dumps({"reply": "Ok.", "actions": [action]}))
 
     response = client.post("/api/ai/chat", json={"question": "Date"})
 
@@ -691,11 +658,8 @@ def test_ai_chat_rejects_invalid_due_date_actions(
 def test_ai_chat_prompt_includes_today_and_due_date_shape(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from datetime import date
-
     sign_in(client)
-    captured: dict = {}
-    ai_returns(monkeypatch, {"reply": "Hi.", "actions": []}, captured)
+    captured = fake_ai(monkeypatch, '{"reply": "Hi.", "actions": []}')
 
     client.post("/api/ai/chat", json={"question": "Due Friday"})
 
@@ -708,10 +672,6 @@ def test_ai_chat_prompt_includes_today_and_due_date_shape(
 
 
 def test_board_chat_calendar_lists_the_next_two_weeks() -> None:
-    from datetime import date
-
-    from app.main import build_board_chat_messages
-
     _, user = build_board_chat_messages(
         "Due Friday", {"columns": [], "cards": {}}, [], date(2026, 11, 7)
     )

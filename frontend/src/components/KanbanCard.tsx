@@ -98,9 +98,7 @@ export const KanbanCard = ({ card, dueStatus, onDelete, onEdit }: KanbanCardProp
             </button>
             <button
               type="button"
-              onClick={() => {
-                setIsEditing(false);
-              }}
+              onClick={() => setIsEditing(false)}
               className="rounded-full border border-[var(--stroke)] px-3 py-2 text-xs font-semibold text-[var(--gray-text)]"
             >
               Cancel

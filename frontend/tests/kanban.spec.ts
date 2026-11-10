@@ -1,4 +1,9 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+type Board = {
+  columns: { id: string; title: string; cardIds: string[] }[];
+  cards: Record<string, { id: string; title: string; details: string; dueDate?: string | null }>;
+};
 
 const signIn = async (page: Page) => {
   await page.goto("/");
@@ -9,9 +14,59 @@ const signIn = async (page: Page) => {
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
 };
 
+const getBoard = (page: Page): Promise<Board> =>
+  page.evaluate(async () => {
+    const response = await fetch("/api/board");
+    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
+    return response.json();
+  });
+
+const putBoard = (page: Page, board: Board): Promise<number> =>
+  page.evaluate(async (body) => {
+    const response = await fetch("/api/board", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return response.status;
+  }, board);
+
+// Runs a test with a copy of the current board and restores the original afterwards.
+const withRestoredBoard = async (page: Page, run: (board: Board) => Promise<void>) => {
+  const originalBoard = await getBoard(page);
+  try {
+    await run(structuredClone(originalBoard));
+  } finally {
+    if ((await putBoard(page, originalBoard)) !== 200) {
+      throw new Error("Unable to restore board after test.");
+    }
+  }
+};
+
+const dragTo = async (page: Page, card: Locator, target: Locator) => {
+  const cardBox = await card.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!cardBox || !targetBox) {
+    throw new Error("Unable to resolve drag coordinates.");
+  }
+  await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 120, { steps: 12 });
+  await page.mouse.up();
+};
+
+const localDate = (offsetDays: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+};
+
 test("loads the kanban board", async ({ page }) => {
   await signIn(page);
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
   await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
 });
 
@@ -57,24 +112,8 @@ test("moves a card between columns", async ({ page }) => {
   if (!cardTestId) {
     throw new Error("Unable to resolve card test id.");
   }
-  const dragInto = async (target: typeof targetColumn) => {
-    const cardBox = await page.getByTestId(cardTestId).boundingBox();
-    const columnBox = await target.boundingBox();
-    if (!cardBox || !columnBox) {
-      throw new Error("Unable to resolve drag coordinates.");
-    }
-
-    await page.mouse.move(
-      cardBox.x + cardBox.width / 2,
-      cardBox.y + cardBox.height / 2
-    );
-    await page.mouse.down();
-    await page.mouse.move(
-      columnBox.x + columnBox.width / 2,
-      columnBox.y + 120,
-      { steps: 12 }
-    );
-    await page.mouse.up();
+  const dragInto = async (target: Locator) => {
+    await dragTo(page, page.getByTestId(cardTestId), target);
     await expect(target.getByTestId(cardTestId)).toBeVisible();
     await expect(page.getByText("All changes saved")).toBeVisible();
   };
@@ -85,19 +124,6 @@ test("moves a card between columns", async ({ page }) => {
 
 test("moves a card from In Progress to Discovery and Backlog", async ({ page }) => {
   await signIn(page);
-  const originalBoard = await page.evaluate(async () => {
-    const response = await fetch("/api/board");
-    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
-    return response.json();
-  });
-  const arrangedBoard = structuredClone(originalBoard);
-  for (const column of arrangedBoard.columns) {
-    column.cardIds = column.cardIds.filter((id: string) => id !== "card-4");
-  }
-  arrangedBoard.columns.find(
-    (column: { id: string }) => column.id === "col-progress"
-  )!.cardIds.push("card-4");
-
   const dragCardToColumn = async (cardId: string, columnId: string) => {
     const card = page.getByTestId(`card-${cardId}`);
     const target = page.getByTestId(`column-${columnId}`);
@@ -134,43 +160,24 @@ test("moves a card from In Progress to Discovery and Backlog", async ({ page }) 
     await expect(page.getByText("All changes saved")).toBeVisible();
   };
 
-  try {
-    const setupStatus = await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
-      });
-      return response.status;
-    }, arrangedBoard);
-    if (setupStatus !== 200) {
+  await withRestoredBoard(page, async (board) => {
+    for (const column of board.columns) {
+      column.cardIds = column.cardIds.filter((id) => id !== "card-4");
+    }
+    board.columns.find((column) => column.id === "col-progress")!.cardIds.push("card-4");
+    if ((await putBoard(page, board)) !== 200) {
       throw new Error("Unable to arrange a card in In Progress.");
     }
     await page.reload();
     await expect(page.getByTestId("column-col-progress").getByTestId("card-card-4")).toBeVisible();
     await dragCardToColumn("card-4", "col-discovery");
     await dragCardToColumn("card-4", "col-backlog");
-  } finally {
-    await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
-      });
-      if (!response.ok) throw new Error("Unable to restore board after test.");
-    }, originalBoard);
-  }
+  });
 });
 
 test("persists card and column changes across reload", async ({ page }) => {
   await signIn(page);
-  const originalBoard = await page.evaluate(async () => {
-    const response = await fetch("/api/board");
-    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
-    return response.json();
-  });
-
-  try {
+  await withRestoredBoard(page, async (originalBoard) => {
     const sourceColumn = page.getByTestId(
       `column-${originalBoard.columns[0].id}`
     );
@@ -206,15 +213,7 @@ test("persists card and column changes across reload", async ({ page }) => {
     const editedCard = sourceColumn.locator("article").filter({
       has: page.getByRole("heading", { name: editedCardTitle }),
     });
-    const cardBox = await editedCard.boundingBox();
-    const targetBox = await targetColumn.boundingBox();
-    if (!cardBox || !targetBox) {
-      throw new Error("Unable to resolve card movement coordinates.");
-    }
-    await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 120, { steps: 12 });
-    await page.mouse.up();
+    await dragTo(page, editedCard, targetColumn);
     await expect(targetColumn.getByText(editedCardTitle)).toBeVisible();
     await expect(page.getByText("All changes saved")).toBeVisible();
 
@@ -241,16 +240,7 @@ test("persists card and column changes across reload", async ({ page }) => {
         .getByTestId(`column-${originalBoard.columns[4].id}`)
         .getByText(editedCardTitle)
     ).toHaveCount(0);
-  } finally {
-    await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
-      });
-      if (!response.ok) throw new Error("Unable to restore board after test.");
-    }, originalBoard);
-  }
+  });
 });
 
 test("rejects incorrect credentials", async ({ page }) => {
@@ -293,38 +283,23 @@ test("AI chat displays a reply when the board is unchanged", async ({ page }) =>
 
 test("AI chat refreshes and persists a board update", async ({ page }) => {
   await signIn(page);
-  const originalBoard = await page.evaluate(async () => {
-    const response = await fetch("/api/board");
-    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
-    return response.json();
-  });
-  const updatedBoard = structuredClone(originalBoard);
-  updatedBoard.cards["card-1"].title = "AI-updated roadmap";
-
-  await page.route("**/api/ai/chat", async (route) => {
-    const saveResponse = await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
+  await withRestoredBoard(page, async (updatedBoard) => {
+    updatedBoard.cards["card-1"].title = "AI-updated roadmap";
+    await page.route("**/api/ai/chat", async (route) => {
+      if ((await putBoard(page, updatedBoard)) !== 200) {
+        await route.fulfill({ status: 500, body: "Unable to save the mock AI update." });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "I renamed the roadmap card.",
+          board_update: updatedBoard,
+        }),
       });
-      return response.status;
-    }, updatedBoard);
-    if (saveResponse !== 200) {
-      await route.fulfill({ status: 500, body: "Unable to save the mock AI update." });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        reply: "I renamed the roadmap card.",
-        board_update: updatedBoard,
-      }),
     });
-  });
 
-  try {
     await page.getByLabel("Message the AI assistant").fill("Rename the roadmap card");
     await page.getByRole("button", { name: "Send message" }).click();
     await expect(page.getByRole("heading", { name: "AI-updated roadmap" })).toBeVisible();
@@ -332,71 +307,42 @@ test("AI chat refreshes and persists a board update", async ({ page }) => {
 
     await page.reload();
     await expect(page.getByRole("heading", { name: "AI-updated roadmap" })).toBeVisible();
-  } finally {
-    await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
-      });
-      if (!response.ok) throw new Error("Unable to restore board after test.");
-    }, originalBoard);
-  }
+  });
 });
 
 test("AI chat creates, edits, and moves cards in one request", async ({ page }) => {
   await signIn(page);
-  const originalBoard = await page.evaluate(async () => {
-    const response = await fetch("/api/board");
-    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
-    return response.json();
-  });
-  const updatedBoard = structuredClone(originalBoard);
-  const newCardId = `ai-e2e-${Date.now()}`;
-  updatedBoard.cards[newCardId] = {
-    id: newCardId,
-    title: "blue ring",
-    details: "",
-  };
-  updatedBoard.columns[0].cardIds.push(newCardId);
-  updatedBoard.cards["card-1"].title = "AI-edited roadmap";
-  for (const column of updatedBoard.columns) {
-    column.cardIds = column.cardIds.filter((id: string) => id !== "card-4");
-  }
-  updatedBoard.columns.find(
-    (column: { id: string }) => column.id === "col-discovery"
-  )!.cardIds.push("card-4");
-  const roadmapColumn = originalBoard.columns.find(
-    (column: { cardIds: string[] }) => column.cardIds.includes("card-1")
-  );
-  if (!roadmapColumn) {
-    throw new Error("Unable to find the roadmap card.");
-  }
-
-  await page.route("**/api/ai/chat", async (route) => {
-    const saveStatus = await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
-      });
-      return response.status;
-    }, updatedBoard);
-    if (saveStatus !== 200) {
-      await route.fulfill({ status: 500, body: "Unable to save the mock AI update." });
-      return;
+  await withRestoredBoard(page, async (updatedBoard) => {
+    const roadmapColumn = updatedBoard.columns.find((column) =>
+      column.cardIds.includes("card-1")
+    );
+    if (!roadmapColumn) {
+      throw new Error("Unable to find the roadmap card.");
     }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        reply: "Created blue ring, edited the roadmap card, and moved a card.",
-        board_update: updatedBoard,
-      }),
-    });
-  });
+    const newCardId = `ai-e2e-${Date.now()}`;
+    updatedBoard.cards[newCardId] = { id: newCardId, title: "blue ring", details: "" };
+    updatedBoard.columns[0].cardIds.push(newCardId);
+    updatedBoard.cards["card-1"].title = "AI-edited roadmap";
+    for (const column of updatedBoard.columns) {
+      column.cardIds = column.cardIds.filter((id) => id !== "card-4");
+    }
+    updatedBoard.columns.find((column) => column.id === "col-discovery")!.cardIds.push("card-4");
 
-  try {
+    await page.route("**/api/ai/chat", async (route) => {
+      if ((await putBoard(page, updatedBoard)) !== 200) {
+        await route.fulfill({ status: 500, body: "Unable to save the mock AI update." });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "Created blue ring, edited the roadmap card, and moved a card.",
+          board_update: updatedBoard,
+        }),
+      });
+    });
+
     await page
       .getByLabel("Message the AI assistant")
       .fill('Create "blue ring" in Backlog, edit the roadmap, and move card-4 to Discovery.');
@@ -420,35 +366,20 @@ test("AI chat creates, edits, and moves cards in one request", async ({ page }) 
     await expect(
       page.getByTestId("column-col-discovery").getByTestId("card-card-4")
     ).toBeVisible();
-  } finally {
-    await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
-      });
-      if (!response.ok) throw new Error("Unable to restore board after test.");
-    }, originalBoard);
-  }
+  });
 });
 
 test("moves a card with the keyboard", async ({ page }) => {
   await signIn(page);
-  const originalBoard = await page.evaluate(async () => {
-    const response = await fetch("/api/board");
-    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
-    return response.json();
-  });
-  const sourceIndex = originalBoard.columns.findIndex(
-    (column: { cardIds: string[] }, index: number) =>
-      index < 4 && column.cardIds.length > 0
-  );
-  const cardId = originalBoard.columns[sourceIndex].cardIds[0];
-  const sourceColumn = page.getByTestId(
-    `column-${originalBoard.columns[sourceIndex].id}`
-  );
+  await withRestoredBoard(page, async (originalBoard) => {
+    const sourceIndex = originalBoard.columns.findIndex(
+      (column, index) => index < 4 && column.cardIds.length > 0
+    );
+    const cardId = originalBoard.columns[sourceIndex].cardIds[0];
+    const sourceColumn = page.getByTestId(
+      `column-${originalBoard.columns[sourceIndex].id}`
+    );
 
-  try {
     const announcement = page.locator('[id^="DndLiveRegion"]');
     await page.getByTestId(`card-${cardId}`).focus();
     await page.keyboard.press("Space");
@@ -462,68 +393,13 @@ test("moves a card with the keyboard", async ({ page }) => {
     await page.keyboard.press("Space");
     await expect(sourceColumn.getByTestId(`card-${cardId}`)).toHaveCount(0);
     await expect(page.getByText("All changes saved")).toBeVisible();
-    const savedBoard = await page.evaluate(async () => {
-      const response = await fetch("/api/board");
-      return response.json();
-    });
-    const savedIndex = savedBoard.columns.findIndex(
-      (column: { cardIds: string[] }) => column.cardIds.includes(cardId)
+    const savedBoard = await getBoard(page);
+    const savedIndex = savedBoard.columns.findIndex((column) =>
+      column.cardIds.includes(cardId)
     );
     expect(savedIndex).toBeGreaterThan(sourceIndex);
-  } finally {
-    await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
-      });
-      if (!response.ok) throw new Error("Unable to restore board after test.");
-    }, originalBoard);
-  }
-});
-
-const localDate = (offsetDays: number) => {
-  const date = new Date();
-  date.setDate(date.getDate() + offsetDays);
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
-};
-
-const withRestoredBoard = async (
-  page: Page,
-  run: (board: { columns: { id: string; cardIds: string[] }[]; cards: Record<string, { id: string; title: string; details: string; dueDate?: string | null }> }) => Promise<void>
-) => {
-  const originalBoard = await page.evaluate(async () => {
-    const response = await fetch("/api/board");
-    if (!response.ok) throw new Error("Unable to read board for test cleanup.");
-    return response.json();
   });
-  try {
-    await run(structuredClone(originalBoard));
-  } finally {
-    await page.evaluate(async (board) => {
-      const response = await fetch("/api/board", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(board),
-      });
-      if (!response.ok) throw new Error("Unable to restore board after test.");
-    }, originalBoard);
-  }
-};
-
-const putBoard = (page: Page, board: unknown) =>
-  page.evaluate(async (body) => {
-    const response = await fetch("/api/board", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) throw new Error("Unable to set up board.");
-  }, board);
+});
 
 test("creates a card with a due date that persists", async ({ page }) => {
   await signIn(page);
@@ -559,7 +435,9 @@ test("overdue cards lose their colour when done or postponed", async ({ page }) 
       board.cards[id] = { id, title: `E2E ${id}`, details: "", dueDate: localDate(-1) };
     }
     backlog.cardIds.unshift(firstId, secondId);
-    await putBoard(page, board);
+    if ((await putBoard(page, board)) !== 200) {
+      throw new Error("Unable to set up board.");
+    }
     await page.reload();
 
     const first = page.getByTestId(`card-${firstId}`);
@@ -573,13 +451,7 @@ test("overdue cards lose their colour when done or postponed", async ({ page }) 
     expect(styles).toEqual(["rgb(254, 242, 242)", "rgb(220, 38, 38)"]);
 
     const doneColumn = page.getByTestId("column-col-done");
-    const cardBox = await first.boundingBox();
-    const doneBox = await doneColumn.boundingBox();
-    if (!cardBox || !doneBox) throw new Error("Unable to resolve drag coordinates.");
-    await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(doneBox.x + doneBox.width / 2, doneBox.y + 120, { steps: 12 });
-    await page.mouse.up();
+    await dragTo(page, first, doneColumn);
     await expect(doneColumn.getByTestId(`card-${firstId}`)).toHaveAttribute(
       "data-due-status",
       "none"

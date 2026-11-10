@@ -72,20 +72,15 @@ def get_database_path() -> Path:
     return Path(os.environ.get("DATABASE_PATH", Path(__file__).parent / "kanban.sqlite3"))
 
 
-def connect_database(database_path: Path | None = None) -> sqlite3.Connection:
+@contextmanager
+def database_connection(
+    database_path: Path | None = None,
+) -> Iterator[sqlite3.Connection]:
     path = database_path or get_database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
-    return connection
-
-
-@contextmanager
-def database_connection(
-    database_path: Path | None = None,
-) -> Iterator[sqlite3.Connection]:
-    connection = connect_database(database_path)
     try:
         with connection:
             yield connection
@@ -184,21 +179,25 @@ def initialize_database(database_path: Path | None = None) -> None:
                 positions[column_id] += 1
 
 
+def find_board_id(connection: sqlite3.Connection, username: str) -> str | None:
+    row = connection.execute(
+        """
+        SELECT boards.id
+        FROM boards
+        JOIN users ON users.id = boards.user_id
+        WHERE users.username = ?
+        """,
+        (username,),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def get_board(username: str, database_path: Path | None = None) -> dict | None:
     with database_connection(database_path) as connection:
-        row = connection.execute(
-            """
-            SELECT boards.id AS board_id, users.id AS user_id
-            FROM boards
-            JOIN users ON users.id = boards.user_id
-            WHERE users.username = ?
-            """,
-            (username,),
-        ).fetchone()
-        if row is None:
+        board_id = find_board_id(connection, username)
+        if board_id is None:
             return None
 
-        board_id = row["board_id"]
         columns = [
             {"id": column["id"], "title": column["title"], "cardIds": []}
             for column in connection.execute(
@@ -211,7 +210,7 @@ def get_board(username: str, database_path: Path | None = None) -> dict | None:
         ]
         columns_by_id = {column["id"]: column for column in columns}
         cards = {}
-        rows = connection.execute(
+        for card in connection.execute(
             """
             SELECT cards.id, cards.title, cards.details, cards.due_date, cards.column_id
             FROM cards
@@ -222,8 +221,7 @@ def get_board(username: str, database_path: Path | None = None) -> dict | None:
             ORDER BY columns.position, cards.position
             """,
             (board_id,),
-        )
-        for card in rows:
+        ):
             cards[card["id"]] = {
                 "id": card["id"],
                 "title": card["title"],
@@ -241,19 +239,10 @@ def save_board(
     database_path: Path | None = None,
 ) -> None:
     with database_connection(database_path) as connection:
-        row = connection.execute(
-            """
-            SELECT boards.id AS board_id
-            FROM boards
-            JOIN users ON users.id = boards.user_id
-            WHERE users.username = ?
-            """,
-            (username,),
-        ).fetchone()
-        if row is None:
+        board_id = find_board_id(connection, username)
+        if board_id is None:
             raise LookupError("The signed-in user does not have a board.")
 
-        board_id = row["board_id"]
         stored_column_ids = [
             column["id"]
             for column in connection.execute(

@@ -10,6 +10,11 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [formState, setFormState] = useState(initialFormState);
 
+  const close = () => {
+    setFormState(initialFormState);
+    setIsOpen(false);
+  };
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!formState.title.trim()) {
@@ -20,8 +25,7 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
       formState.details.trim(),
       formState.dueDate || null
     );
-    setFormState(initialFormState);
-    setIsOpen(false);
+    close();
   };
 
   return (
@@ -66,10 +70,7 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
             </button>
             <button
               type="button"
-              onClick={() => {
-                setIsOpen(false);
-                setFormState(initialFormState);
-              }}
+              onClick={close}
               className="rounded-full border border-[var(--stroke)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
             >
               Cancel
